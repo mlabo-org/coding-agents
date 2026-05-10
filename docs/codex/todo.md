@@ -30,3 +30,12 @@
 - [x] T-005.1 Audit initial `SKILL.md` wording against `skill-md-clarifier` criteria.
 - [ ] T-005.2 Audit the first real Coding Agents run against `SKILL.md`.
 - [ ] T-005.3 Record missing runner, hook, MCP, or app support as implementation backlog.
+
+## T-006 Runnable MVP CLI
+
+- [x] T-006.1 Add `bin/coding-agents.mjs` with `intake`, `handoff`, `doctor`, and `--help`.
+- [x] T-006.2 Generate/update README, project, task, todo, decisions, audit, assignments, and handoff files in target `docs/codex`.
+- [x] T-006.3 Include 14 role assignments with `role`, `status`, `task_id`, `epoch`, `scope`, `assignment`, and `expected_output`.
+- [x] T-006.4 Use generated marker sections to avoid overwriting non-generated target files.
+- [x] T-006.5 Update `SKILL.md` for source CLI usage before marketplace/cache activation.
+- [x] T-006.6 Run CLI verification and commit the MVP implementation.

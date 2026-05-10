@@ -2,30 +2,30 @@
 
 ## Objective
 
-Initialize `/Users/suzukimakoto/plugins/coding-agents` as the source repository for the home-local `coding-agents` Codex plugin and convert the agreed workflow into implementation-start TODO and instructions.
+Implement a directly runnable coding-agents MVP in `/Users/suzukimakoto/plugins/coding-agents` without marketplace registration or plugin cache refresh.
 
 ## Scope
 
-- Create `.codex-plugin/plugin.json`.
-- Create `skills/coding-agents/SKILL.md`.
-- Create initial `docs/codex` workflow files.
-- Create `.gitignore`.
-- Initialize Git if needed.
-- Commit only the source files created for this initialization.
+- Add `bin/coding-agents.mjs` using Node.js standard libraries only.
+- Update `skills/coding-agents/SKILL.md` with source CLI workflow and boundaries.
+- Update `docs/codex` workflow files for the MVP.
+- Commit only this task's source changes.
 
 ## Non-Goals
 
 - Do not edit `~/.codex/plugins/cache/`.
 - Do not edit `~/.agents/plugins/marketplace.json`.
 - Do not add dependencies.
-- Do not implement MCP servers, hooks, scripts, or subagent runtime code in this task.
+- Do not run `npm install`, `pip`, `python`, or `python3`.
+- Do not implement MCP servers, hooks, or real subagent runtime code in this task.
 - Do not touch files outside `/Users/suzukimakoto/plugins/coding-agents`.
 
 ## Completion Conditions
 
-- Plugin manifest exists and is schema-plausible for a minimal local plugin.
-- `SKILL.md` has aligned frontmatter/body trigger contract and includes the agreed Coding Agents operating model.
-- `docs/codex` contains README, project, task, todo, decisions, and audit files.
-- `.gitignore` excludes cache, runtime, logs, secrets, and Python bytecode artifacts.
-- Repository is initialized and one initial commit records this plugin specification.
-- Remaining marketplace/cache activation work is captured as TODO, not performed.
+- `node bin/coding-agents.mjs --help` works.
+- `intake` creates or updates target `docs/codex` files.
+- `doctor` reports required files, 14 role assignments, isolation keys, and Git state.
+- `handoff` prints the generated handoff prompt.
+- Re-running `intake` is idempotent for generated sections.
+- `SKILL.md` passes `skill-md-clarifier` criteria for trigger, workflow, boundaries, and output shape.
+- Marketplace/cache activation remains deferred.

@@ -1,6 +1,6 @@
 ---
 name: coding-agents
-description: Use when the user wants Coding Agents to treat the current project cwd as the jobsite and run a coding workflow through project intake, docs/codex planning files, scoped specialist subagents, execution-material collection, and audit. Trigger for requests to initialize, plan, execute, coordinate, or audit coding work with a parent agent plus subagent development team. Do not use for generic coding edits when the user has not asked for this workflow or plugin.
+description: Use when the user wants the Coding Agents workflow or source CLI to intake a project cwd, generate or update docs/codex planning files, assign the 14 specialist roles with task_id/epoch/scope isolation, print a handoff prompt, or audit the workflow state. Trigger for requests to initialize, plan, execute, coordinate, or audit coding work with the coding-agents MVP before marketplace/cache activation. Do not use for generic coding edits when the user has not asked for this workflow or plugin.
 ---
 
 # Coding Agents
@@ -11,14 +11,15 @@ Codex は、本書の発火前提、作業手順、ツール境界、ファイ�
 
 ## Trigger Boundary
 
-Use this skill only when the user explicitly asks for the `coding-agents` plugin, Coding Agents workflow, subagent development team coordination, or the `docs/codex` planning/audit workflow.
+Use this skill only when the user explicitly asks for the `coding-agents` plugin, Coding Agents workflow, source CLI, subagent development team coordination, or the `docs/codex` planning/audit workflow.
 Do not trigger this skill for ordinary one-off code edits, reviews, or explanations unless the user connects the work to Coding Agents.
 
 ## Core Contract
 
 - Treat the current working directory as the jobsite. `cwd is jobsite` is the default intake rule unless the user names another project root.
-- The first action after trigger is project intake. Read the local `AGENTS.md` chain that applies to the jobsite, inspect the repository shape, check Git state, and identify existing `docs/codex` files before planning edits.
-- Maintain `docs/codex/task.md`, `docs/codex/todo.md`, `docs/codex/decisions.md`, and `docs/codex/audit.md` as the workflow SSOT for the active job.
+- The first action after trigger is project intake. Read the local `AGENTS.md` chain that applies to the jobsite when available, inspect the repository shape, check Git state, and identify existing `docs/codex` files before planning edits.
+- When plugin marketplace/cache activation is not part of the user's active request, run the source CLI directly from the source repository: `node /Users/suzukimakoto/plugins/coding-agents/bin/coding-agents.mjs ...`.
+- Maintain `docs/codex/task.md`, `docs/codex/todo.md`, `docs/codex/decisions.md`, `docs/codex/audit.md`, `docs/codex/assignments.md`, and `docs/codex/handoff.md` as the workflow SSOT for the active job.
 - When the user confirms a design or operating decision, record it as an accepted decision, convert it into actionable specification, and audit execution against it after implementation.
 - The parent agent owns task decomposition, policy decisions, user consultation, conflict resolution, final integration, and final reporting.
 - Subagents own research, implementation material, verification material, and isolated findings. They do not own final policy or final user-facing synthesis.
@@ -40,13 +41,28 @@ Do not trigger this skill for ordinary one-off code edits, reviews, or explanati
 - `docs/codex/todo.md`: executable checklist with stable task IDs.
 - `docs/codex/decisions.md`: accepted decisions with IDs and implementation impact.
 - `docs/codex/audit.md`: audit log, completed checks, skipped checks, and next audit needs.
+- `docs/codex/assignments.md`: 14 role assignments. Each role must include `role`, `status`, `task_id`, `epoch`, `scope`, `assignment`, and `expected_output`.
+- `docs/codex/handoff.md`: prompt material for the next worker to continue the task.
+
+## Source CLI MVP Workflow
+
+Use the source CLI when the user wants a runnable MVP before marketplace/cache activation.
+
+1. Resolve the target jobsite path.
+2. Run intake with explicit isolation keys:
+   `node /Users/suzukimakoto/plugins/coding-agents/bin/coding-agents.mjs intake --cwd <jobsite> --task <task> --task-id <id> --epoch <epoch> --scope <scope>`.
+3. Run doctor:
+   `node /Users/suzukimakoto/plugins/coding-agents/bin/coding-agents.mjs doctor --cwd <jobsite>`.
+4. Print handoff when needed:
+   `node /Users/suzukimakoto/plugins/coding-agents/bin/coding-agents.mjs handoff --cwd <jobsite> --task-id <id>`.
+5. Treat marketplace registration and `~/.codex/plugins/cache/` refresh as separate later work unless the user explicitly includes them.
 
 ## Workflow
 
 1. Resolve the jobsite from cwd unless the user explicitly names another root.
 2. Run project intake before editing: repository status, applicable instructions, current docs/codex state, likely source/cache boundaries, and risk level.
 3. Create or update the required `docs/codex` files before implementation when the workflow state is missing or stale.
-4. Initialize the empty specialist warm pool and define the first assignments with `task_id`, `epoch`, and `scope`.
+4. Initialize the empty specialist warm pool and define the first 14 role assignments with `task_id`, `epoch`, and `scope`.
 5. Execute or coordinate work according to `docs/codex/todo.md`.
 6. Record user-confirmed decisions in `docs/codex/decisions.md` and update `docs/codex/task.md` when scope changes.
 7. Verify implementation against the accepted decisions and completion conditions.
@@ -57,8 +73,9 @@ Do not trigger this skill for ordinary one-off code edits, reviews, or explanati
 
 - Edit jobsite files only inside the active task scope.
 - Treat plugin source directories as source of truth. Do not patch `~/.codex/plugins/cache/` as the primary edit target.
-- Do not edit marketplace files unless the user explicitly includes that in the active task scope.
+- Do not edit `~/.codex/plugins/cache/` or marketplace files unless the user explicitly includes that in the active task scope.
 - Preserve unrelated user or worker changes. If another change appears in scope, work around it or report the conflict; do not revert it.
+- The MVP CLI uses Node.js standard libraries only. Do not add dependencies to run intake, handoff, or doctor.
 
 ## Output Shape
 

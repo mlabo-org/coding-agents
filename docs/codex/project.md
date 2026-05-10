@@ -24,4 +24,6 @@ At initialization time, the directory existed but was not yet a Git repository a
 
 ## Current Capability
 
-This initial version provides a manifest, a single operational skill, and Codex-facing planning/audit documents. It does not yet include MCP servers, app connectors, hooks, scripts, or concrete subagent runner code.
+This MVP provides a source CLI at `bin/coding-agents.mjs`. It can be run directly with Node.js standard libraries to create or update a target project's `docs/codex` files, including 14 role assignments and a handoff prompt. It does not require marketplace registration or plugin cache refresh.
+
+It does not yet include MCP servers, app connectors, hooks, or real subagent process orchestration.
