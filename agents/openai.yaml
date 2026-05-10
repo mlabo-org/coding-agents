@@ -1,0 +1,3 @@
+display_name: Coding Agents
+short_description: Scope, assign, audit, and hand off Codex coding work.
+default_prompt: Use coding-agents to intake this repository, maintain docs/codex workflow files, assign scoped roles, and prepare a concise handoff without touching unrelated changes.

@@ -10,13 +10,13 @@
 
 ## T-002 Marketplace Registration
 
-- [ ] T-002.1 Add `coding-agents` to `~/.agents/plugins/marketplace.json` only after explicit user approval.
-- [ ] T-002.2 Confirm marketplace entry uses source path `./plugins/coding-agents`.
+- [x] T-002.1 Add `coding-agents` to `~/.agents/plugins/marketplace.json` only after explicit user approval.
+- [x] T-002.2 Confirm marketplace entry uses source path `./plugins/coding-agents`.
 
 ## T-003 Cache Refresh
 
-- [ ] T-003.1 Refresh plugin cache from source using the approved refresh workflow.
-- [ ] T-003.2 Tell the user whether Codex restart or a new thread is needed.
+- [x] T-003.1 Refresh plugin cache from source using the approved refresh workflow.
+- [x] T-003.2 Tell the user whether Codex restart or a new thread is needed.
 
 ## T-004 Subagent Runtime Design
 
