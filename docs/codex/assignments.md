@@ -65,9 +65,9 @@ Every specialist return should be concise and shaped for parent integration:
 
 - role: Intake
 - status: assigned
-- task_id: REPO-INTAKE-001
-- epoch: E20260511-intake
-- scope: docs/codex/*.md only; read-only repo inspection
+- task_id: CA-RB-IMPLEMENT-001
+- epoch: 2026-05-11T00
+- scope: bin/coding-agents.mjs and docs/codex/*.md
 - assignment: Confirm project instructions, cwd, task, and existing docs/codex state.
 - expected_output: Intake summary with blockers.
 
@@ -75,9 +75,9 @@ Every specialist return should be concise and shaped for parent integration:
 
 - role: Repo Mapper
 - status: assigned
-- task_id: REPO-INTAKE-001
-- epoch: E20260511-intake
-- scope: docs/codex/*.md only; read-only repo inspection
+- task_id: CA-RB-IMPLEMENT-001
+- epoch: 2026-05-11T00
+- scope: bin/coding-agents.mjs and docs/codex/*.md
 - assignment: Map repository structure and likely edit boundaries.
 - expected_output: Repo map and source boundaries.
 
@@ -85,9 +85,9 @@ Every specialist return should be concise and shaped for parent integration:
 
 - role: Requirements
 - status: assigned
-- task_id: REPO-INTAKE-001
-- epoch: E20260511-intake
-- scope: docs/codex/*.md only; read-only repo inspection
+- task_id: CA-RB-IMPLEMENT-001
+- epoch: 2026-05-11T00
+- scope: bin/coding-agents.mjs and docs/codex/*.md
 - assignment: Extract explicit requirements and non-goals.
 - expected_output: Requirement list with ambiguity notes.
 
@@ -95,9 +95,9 @@ Every specialist return should be concise and shaped for parent integration:
 
 - role: Planner
 - status: assigned
-- task_id: REPO-INTAKE-001
-- epoch: E20260511-intake
-- scope: docs/codex/*.md only; read-only repo inspection
+- task_id: CA-RB-IMPLEMENT-001
+- epoch: 2026-05-11T00
+- scope: bin/coding-agents.mjs and docs/codex/*.md
 - assignment: Convert requirements into an executable task sequence.
 - expected_output: Plan with ordered checkpoints.
 
@@ -105,9 +105,9 @@ Every specialist return should be concise and shaped for parent integration:
 
 - role: Architect
 - status: assigned
-- task_id: REPO-INTAKE-001
-- epoch: E20260511-intake
-- scope: docs/codex/*.md only; read-only repo inspection
+- task_id: CA-RB-IMPLEMENT-001
+- epoch: 2026-05-11T00
+- scope: bin/coding-agents.mjs and docs/codex/*.md
 - assignment: Identify design constraints and integration points.
 - expected_output: Architecture notes and risk points.
 
@@ -115,9 +115,9 @@ Every specialist return should be concise and shaped for parent integration:
 
 - role: Implementer
 - status: assigned
-- task_id: REPO-INTAKE-001
-- epoch: E20260511-intake
-- scope: docs/codex/*.md only; read-only repo inspection
+- task_id: CA-RB-IMPLEMENT-001
+- epoch: 2026-05-11T00
+- scope: bin/coding-agents.mjs and docs/codex/*.md
 - assignment: Make scoped code or document changes when requested.
 - expected_output: Changed files and implementation notes.
 
@@ -125,9 +125,9 @@ Every specialist return should be concise and shaped for parent integration:
 
 - role: Test Runner
 - status: assigned
-- task_id: REPO-INTAKE-001
-- epoch: E20260511-intake
-- scope: docs/codex/*.md only; read-only repo inspection
+- task_id: CA-RB-IMPLEMENT-001
+- epoch: 2026-05-11T00
+- scope: bin/coding-agents.mjs and docs/codex/*.md
 - assignment: Run allowed verification commands.
 - expected_output: Verification output and skipped checks.
 
@@ -135,9 +135,9 @@ Every specialist return should be concise and shaped for parent integration:
 
 - role: Reviewer
 - status: assigned
-- task_id: REPO-INTAKE-001
-- epoch: E20260511-intake
-- scope: docs/codex/*.md only; read-only repo inspection
+- task_id: CA-RB-IMPLEMENT-001
+- epoch: 2026-05-11T00
+- scope: bin/coding-agents.mjs and docs/codex/*.md
 - assignment: Review diffs for regressions and missing requirements.
 - expected_output: Findings ordered by severity.
 
@@ -145,9 +145,9 @@ Every specialist return should be concise and shaped for parent integration:
 
 - role: Risk Guard
 - status: assigned
-- task_id: REPO-INTAKE-001
-- epoch: E20260511-intake
-- scope: docs/codex/*.md only; read-only repo inspection
+- task_id: CA-RB-IMPLEMENT-001
+- epoch: 2026-05-11T00
+- scope: bin/coding-agents.mjs and docs/codex/*.md
 - assignment: Check destructive actions, external sending, secrets, and scope drift.
 - expected_output: Risk assessment and required stops.
 
@@ -155,9 +155,9 @@ Every specialist return should be concise and shaped for parent integration:
 
 - role: Docs Keeper
 - status: assigned
-- task_id: REPO-INTAKE-001
-- epoch: E20260511-intake
-- scope: docs/codex/*.md only; read-only repo inspection
+- task_id: CA-RB-IMPLEMENT-001
+- epoch: 2026-05-11T00
+- scope: bin/coding-agents.mjs and docs/codex/*.md
 - assignment: Keep docs/codex task, todo, decisions, and audit current.
 - expected_output: Updated docs summary.
 
@@ -165,9 +165,9 @@ Every specialist return should be concise and shaped for parent integration:
 
 - role: UX
 - status: assigned
-- task_id: REPO-INTAKE-001
-- epoch: E20260511-intake
-- scope: docs/codex/*.md only; read-only repo inspection
+- task_id: CA-RB-IMPLEMENT-001
+- epoch: 2026-05-11T00
+- scope: bin/coding-agents.mjs and docs/codex/*.md
 - assignment: Assess user-facing workflow clarity.
 - expected_output: UX notes and friction points.
 
@@ -175,9 +175,9 @@ Every specialist return should be concise and shaped for parent integration:
 
 - role: Dependency
 - status: assigned
-- task_id: REPO-INTAKE-001
-- epoch: E20260511-intake
-- scope: docs/codex/*.md only; read-only repo inspection
+- task_id: CA-RB-IMPLEMENT-001
+- epoch: 2026-05-11T00
+- scope: bin/coding-agents.mjs and docs/codex/*.md
 - assignment: Check dependency boundaries and avoid unapproved installs.
 - expected_output: Dependency impact notes.
 
@@ -185,9 +185,9 @@ Every specialist return should be concise and shaped for parent integration:
 
 - role: DevOps
 - status: assigned
-- task_id: REPO-INTAKE-001
-- epoch: E20260511-intake
-- scope: docs/codex/*.md only; read-only repo inspection
+- task_id: CA-RB-IMPLEMENT-001
+- epoch: 2026-05-11T00
+- scope: bin/coding-agents.mjs and docs/codex/*.md
 - assignment: Check runnable commands, Git state, and release boundaries.
 - expected_output: Operational readiness notes.
 
@@ -195,9 +195,9 @@ Every specialist return should be concise and shaped for parent integration:
 
 - role: Auditor
 - status: assigned
-- task_id: REPO-INTAKE-001
-- epoch: E20260511-intake
-- scope: docs/codex/*.md only; read-only repo inspection
+- task_id: CA-RB-IMPLEMENT-001
+- epoch: 2026-05-11T00
+- scope: bin/coding-agents.mjs and docs/codex/*.md
 - assignment: Compare outcomes against task_id, epoch, scope, and completion conditions.
 - expected_output: Final audit result.
 <!-- coding-agents-mvp:end -->

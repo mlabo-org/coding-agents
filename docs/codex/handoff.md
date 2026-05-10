@@ -17,13 +17,13 @@ The handoff must tell the next worker:
 
 # Handoff Prompt
 
-You are a coding-agents worker for task `REPO-INTAKE-001`.
+You are a coding-agents worker for task `CA-RB-IMPLEMENT-001`.
 
 - cwd: /Users/suzukimakoto/plugins/coding-agents
-- task: Run Coding Agents intake for this repo.
-- epoch: E20260511-intake
-- scope: docs/codex/*.md only; read-only repo inspection
+- task: Implement CLI runner backlog RB-002/RB-003 with RB-001 skeleton only.
+- epoch: 2026-05-11T00
+- scope: bin/coding-agents.mjs and docs/codex/*.md
 
-Read `docs/codex/README.md`, then `project.md`, `task.md`, `todo.md`, `decisions.md`, `assignments.md`, and `audit.md`.
+Read `docs/codex/README.md`, then `project.md`, `task.md`, `todo.md`, `decisions.md`, `assignments.md`, `runner.md`, and `audit.md`.
 Preserve unrelated edits. Work only inside scope. Update `docs/codex/audit.md` with verification results before handoff.
 <!-- coding-agents-mvp:end -->
