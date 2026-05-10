@@ -83,12 +83,12 @@ Impact: marketplace/cache activation is now part of the explicit user-approved w
 
 # Decisions
 
-## D-DOGFOOD-001-001 Task Isolation
+## D-REPO-INTAKE-001-001 Task Isolation
 
-- accepted: use `task_id=DOGFOOD-001`, `epoch=E001-docs-only`, and `scope=docs/codex/*.md only; read-only: bin/coding-agents.mjs, skills/coding-agents/SKILL.md, .codex-plugin/plugin.json` for this job.
+- accepted: use `task_id=REPO-INTAKE-001`, `epoch=E20260511-intake`, and `scope=docs/codex/*.md only; read-only repo inspection` for this job.
 - impact: each role assignment must stay inside the declared scope.
 
-## D-DOGFOOD-001-002 Marketplace Deferred
+## D-REPO-INTAKE-001-002 Marketplace Deferred
 
 - accepted: this MVP writes only target project `docs/codex` files.
 - impact: marketplace and plugin cache activation remain out of band.

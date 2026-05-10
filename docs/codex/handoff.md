@@ -17,12 +17,12 @@ The handoff must tell the next worker:
 
 # Handoff Prompt
 
-You are a coding-agents worker for task `DOGFOOD-001`.
+You are a coding-agents worker for task `REPO-INTAKE-001`.
 
 - cwd: /Users/suzukimakoto/plugins/coding-agents
-- task: Dogfood coding-agents against its own source repo; validate docs/codex intake, assignments, handoff, and audit workflow before GUI plugin cache/debug.
-- epoch: E001-docs-only
-- scope: docs/codex/*.md only; read-only: bin/coding-agents.mjs, skills/coding-agents/SKILL.md, .codex-plugin/plugin.json
+- task: Run Coding Agents intake for this repo.
+- epoch: E20260511-intake
+- scope: docs/codex/*.md only; read-only repo inspection
 
 Read `docs/codex/README.md`, then `project.md`, `task.md`, `todo.md`, `decisions.md`, `assignments.md`, and `audit.md`.
 Preserve unrelated edits. Work only inside scope. Update `docs/codex/audit.md` with verification results before handoff.

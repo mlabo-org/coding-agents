@@ -28,9 +28,9 @@ Each generated role entry must include `role`, `status`, `task_id`, `epoch`, `sc
 
 - role: Intake
 - status: assigned
-- task_id: DOGFOOD-001
-- epoch: E001-docs-only
-- scope: docs/codex/*.md only; read-only: bin/coding-agents.mjs, skills/coding-agents/SKILL.md, .codex-plugin/plugin.json
+- task_id: REPO-INTAKE-001
+- epoch: E20260511-intake
+- scope: docs/codex/*.md only; read-only repo inspection
 - assignment: Confirm project instructions, cwd, task, and existing docs/codex state.
 - expected_output: Intake summary with blockers.
 
@@ -38,9 +38,9 @@ Each generated role entry must include `role`, `status`, `task_id`, `epoch`, `sc
 
 - role: Repo Mapper
 - status: assigned
-- task_id: DOGFOOD-001
-- epoch: E001-docs-only
-- scope: docs/codex/*.md only; read-only: bin/coding-agents.mjs, skills/coding-agents/SKILL.md, .codex-plugin/plugin.json
+- task_id: REPO-INTAKE-001
+- epoch: E20260511-intake
+- scope: docs/codex/*.md only; read-only repo inspection
 - assignment: Map repository structure and likely edit boundaries.
 - expected_output: Repo map and source boundaries.
 
@@ -48,9 +48,9 @@ Each generated role entry must include `role`, `status`, `task_id`, `epoch`, `sc
 
 - role: Requirements
 - status: assigned
-- task_id: DOGFOOD-001
-- epoch: E001-docs-only
-- scope: docs/codex/*.md only; read-only: bin/coding-agents.mjs, skills/coding-agents/SKILL.md, .codex-plugin/plugin.json
+- task_id: REPO-INTAKE-001
+- epoch: E20260511-intake
+- scope: docs/codex/*.md only; read-only repo inspection
 - assignment: Extract explicit requirements and non-goals.
 - expected_output: Requirement list with ambiguity notes.
 
@@ -58,9 +58,9 @@ Each generated role entry must include `role`, `status`, `task_id`, `epoch`, `sc
 
 - role: Planner
 - status: assigned
-- task_id: DOGFOOD-001
-- epoch: E001-docs-only
-- scope: docs/codex/*.md only; read-only: bin/coding-agents.mjs, skills/coding-agents/SKILL.md, .codex-plugin/plugin.json
+- task_id: REPO-INTAKE-001
+- epoch: E20260511-intake
+- scope: docs/codex/*.md only; read-only repo inspection
 - assignment: Convert requirements into an executable task sequence.
 - expected_output: Plan with ordered checkpoints.
 
@@ -68,9 +68,9 @@ Each generated role entry must include `role`, `status`, `task_id`, `epoch`, `sc
 
 - role: Architect
 - status: assigned
-- task_id: DOGFOOD-001
-- epoch: E001-docs-only
-- scope: docs/codex/*.md only; read-only: bin/coding-agents.mjs, skills/coding-agents/SKILL.md, .codex-plugin/plugin.json
+- task_id: REPO-INTAKE-001
+- epoch: E20260511-intake
+- scope: docs/codex/*.md only; read-only repo inspection
 - assignment: Identify design constraints and integration points.
 - expected_output: Architecture notes and risk points.
 
@@ -78,9 +78,9 @@ Each generated role entry must include `role`, `status`, `task_id`, `epoch`, `sc
 
 - role: Implementer
 - status: assigned
-- task_id: DOGFOOD-001
-- epoch: E001-docs-only
-- scope: docs/codex/*.md only; read-only: bin/coding-agents.mjs, skills/coding-agents/SKILL.md, .codex-plugin/plugin.json
+- task_id: REPO-INTAKE-001
+- epoch: E20260511-intake
+- scope: docs/codex/*.md only; read-only repo inspection
 - assignment: Make scoped code or document changes when requested.
 - expected_output: Changed files and implementation notes.
 
@@ -88,9 +88,9 @@ Each generated role entry must include `role`, `status`, `task_id`, `epoch`, `sc
 
 - role: Test Runner
 - status: assigned
-- task_id: DOGFOOD-001
-- epoch: E001-docs-only
-- scope: docs/codex/*.md only; read-only: bin/coding-agents.mjs, skills/coding-agents/SKILL.md, .codex-plugin/plugin.json
+- task_id: REPO-INTAKE-001
+- epoch: E20260511-intake
+- scope: docs/codex/*.md only; read-only repo inspection
 - assignment: Run allowed verification commands.
 - expected_output: Verification output and skipped checks.
 
@@ -98,9 +98,9 @@ Each generated role entry must include `role`, `status`, `task_id`, `epoch`, `sc
 
 - role: Reviewer
 - status: assigned
-- task_id: DOGFOOD-001
-- epoch: E001-docs-only
-- scope: docs/codex/*.md only; read-only: bin/coding-agents.mjs, skills/coding-agents/SKILL.md, .codex-plugin/plugin.json
+- task_id: REPO-INTAKE-001
+- epoch: E20260511-intake
+- scope: docs/codex/*.md only; read-only repo inspection
 - assignment: Review diffs for regressions and missing requirements.
 - expected_output: Findings ordered by severity.
 
@@ -108,9 +108,9 @@ Each generated role entry must include `role`, `status`, `task_id`, `epoch`, `sc
 
 - role: Risk Guard
 - status: assigned
-- task_id: DOGFOOD-001
-- epoch: E001-docs-only
-- scope: docs/codex/*.md only; read-only: bin/coding-agents.mjs, skills/coding-agents/SKILL.md, .codex-plugin/plugin.json
+- task_id: REPO-INTAKE-001
+- epoch: E20260511-intake
+- scope: docs/codex/*.md only; read-only repo inspection
 - assignment: Check destructive actions, external sending, secrets, and scope drift.
 - expected_output: Risk assessment and required stops.
 
@@ -118,9 +118,9 @@ Each generated role entry must include `role`, `status`, `task_id`, `epoch`, `sc
 
 - role: Docs Keeper
 - status: assigned
-- task_id: DOGFOOD-001
-- epoch: E001-docs-only
-- scope: docs/codex/*.md only; read-only: bin/coding-agents.mjs, skills/coding-agents/SKILL.md, .codex-plugin/plugin.json
+- task_id: REPO-INTAKE-001
+- epoch: E20260511-intake
+- scope: docs/codex/*.md only; read-only repo inspection
 - assignment: Keep docs/codex task, todo, decisions, and audit current.
 - expected_output: Updated docs summary.
 
@@ -128,9 +128,9 @@ Each generated role entry must include `role`, `status`, `task_id`, `epoch`, `sc
 
 - role: UX
 - status: assigned
-- task_id: DOGFOOD-001
-- epoch: E001-docs-only
-- scope: docs/codex/*.md only; read-only: bin/coding-agents.mjs, skills/coding-agents/SKILL.md, .codex-plugin/plugin.json
+- task_id: REPO-INTAKE-001
+- epoch: E20260511-intake
+- scope: docs/codex/*.md only; read-only repo inspection
 - assignment: Assess user-facing workflow clarity.
 - expected_output: UX notes and friction points.
 
@@ -138,9 +138,9 @@ Each generated role entry must include `role`, `status`, `task_id`, `epoch`, `sc
 
 - role: Dependency
 - status: assigned
-- task_id: DOGFOOD-001
-- epoch: E001-docs-only
-- scope: docs/codex/*.md only; read-only: bin/coding-agents.mjs, skills/coding-agents/SKILL.md, .codex-plugin/plugin.json
+- task_id: REPO-INTAKE-001
+- epoch: E20260511-intake
+- scope: docs/codex/*.md only; read-only repo inspection
 - assignment: Check dependency boundaries and avoid unapproved installs.
 - expected_output: Dependency impact notes.
 
@@ -148,9 +148,9 @@ Each generated role entry must include `role`, `status`, `task_id`, `epoch`, `sc
 
 - role: DevOps
 - status: assigned
-- task_id: DOGFOOD-001
-- epoch: E001-docs-only
-- scope: docs/codex/*.md only; read-only: bin/coding-agents.mjs, skills/coding-agents/SKILL.md, .codex-plugin/plugin.json
+- task_id: REPO-INTAKE-001
+- epoch: E20260511-intake
+- scope: docs/codex/*.md only; read-only repo inspection
 - assignment: Check runnable commands, Git state, and release boundaries.
 - expected_output: Operational readiness notes.
 
@@ -158,9 +158,9 @@ Each generated role entry must include `role`, `status`, `task_id`, `epoch`, `sc
 
 - role: Auditor
 - status: assigned
-- task_id: DOGFOOD-001
-- epoch: E001-docs-only
-- scope: docs/codex/*.md only; read-only: bin/coding-agents.mjs, skills/coding-agents/SKILL.md, .codex-plugin/plugin.json
+- task_id: REPO-INTAKE-001
+- epoch: E20260511-intake
+- scope: docs/codex/*.md only; read-only repo inspection
 - assignment: Compare outcomes against task_id, epoch, scope, and completion conditions.
 - expected_output: Final audit result.
 <!-- coding-agents-mvp:end -->

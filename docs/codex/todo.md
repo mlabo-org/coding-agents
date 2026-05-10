@@ -45,9 +45,9 @@
 
 # TODO
 
-- [x] DOGFOOD-001.1 Run Coding Agents intake for `/Users/suzukimakoto/plugins/coding-agents`.
-- [x] DOGFOOD-001.2 Generate or update `docs/codex` files.
-- [x] DOGFOOD-001.3 Create 14 scoped role assignments for epoch `E001-docs-only`.
-- [ ] DOGFOOD-001.4 Execute work inside scope `docs/codex/*.md only; read-only: bin/coding-agents.mjs, skills/coding-agents/SKILL.md, .codex-plugin/plugin.json`.
-- [ ] DOGFOOD-001.5 Run verification and update `audit.md`.
+- [x] REPO-INTAKE-001.1 Run Coding Agents intake for `/Users/suzukimakoto/plugins/coding-agents`.
+- [x] REPO-INTAKE-001.2 Generate or update `docs/codex` files.
+- [x] REPO-INTAKE-001.3 Create 14 scoped role assignments for epoch `E20260511-intake`.
+- [ ] REPO-INTAKE-001.4 Execute work inside scope `docs/codex/*.md only; read-only repo inspection`.
+- [x] REPO-INTAKE-001.5 Run verification and update `audit.md`.
 <!-- coding-agents-mvp:end -->

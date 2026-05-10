@@ -35,8 +35,8 @@ It does not yet include MCP servers, app connectors, hooks, or real subagent pro
 
 - cwd: /Users/suzukimakoto/plugins/coding-agents
 - docs: /Users/suzukimakoto/plugins/coding-agents/docs/codex
-- git_status: 8 changed line(s)
-- task_id: DOGFOOD-001
-- epoch: E001-docs-only
-- scope: docs/codex/*.md only; read-only: bin/coding-agents.mjs, skills/coding-agents/SKILL.md, .codex-plugin/plugin.json
+- git_status: clean
+- task_id: REPO-INTAKE-001
+- epoch: E20260511-intake
+- scope: docs/codex/*.md only; read-only repo inspection
 <!-- coding-agents-mvp:end -->

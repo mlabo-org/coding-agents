@@ -35,10 +35,10 @@ Implement a directly runnable coding-agents MVP in `/Users/suzukimakoto/plugins/
 
 # Active Task
 
-- task_id: DOGFOOD-001
-- epoch: E001-docs-only
-- scope: docs/codex/*.md only; read-only: bin/coding-agents.mjs, skills/coding-agents/SKILL.md, .codex-plugin/plugin.json
-- task: Dogfood coding-agents against its own source repo; validate docs/codex intake, assignments, handoff, and audit workflow before GUI plugin cache/debug.
+- task_id: REPO-INTAKE-001
+- epoch: E20260511-intake
+- scope: docs/codex/*.md only; read-only repo inspection
+- task: Run Coding Agents intake for this repo.
 
 ## Completion Conditions
 
