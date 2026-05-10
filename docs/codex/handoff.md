@@ -17,12 +17,12 @@ The handoff must tell the next worker:
 
 # Handoff Prompt
 
-You are a coding-agents worker for task `CA-RB-IMPLEMENT-001`.
+You are a coding-agents worker for task `CA-RUNNER-SPAWN-001`.
 
 - cwd: /Users/suzukimakoto/plugins/coding-agents
-- task: Implement CLI runner backlog RB-002/RB-003 with RB-001 skeleton only.
-- epoch: 2026-05-11T00
-- scope: bin/coding-agents.mjs and docs/codex/*.md
+- task: Select and implement a callable runner boundary for real subagent process spawning after the CLI skeleton
+- epoch: 2026-05-11T01
+- scope: /Users/suzukimakoto/plugins/coding-agents
 
 Read `docs/codex/README.md`, then `project.md`, `task.md`, `todo.md`, `decisions.md`, `assignments.md`, `runner.md`, and `audit.md`.
 Preserve unrelated edits. Work only inside scope. Update `docs/codex/audit.md` with verification results before handoff.
