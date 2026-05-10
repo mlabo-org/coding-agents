@@ -20,16 +20,16 @@
 
 ## T-004 Subagent Runtime Design
 
-- [ ] T-004.1 Define warm-pool lifecycle states.
-- [ ] T-004.2 Define `task_id`, `epoch`, and `scope` assignment schema.
-- [ ] T-004.3 Define restart/retire rules and the narrow reuse exception.
-- [ ] T-004.4 Define parent integration output format for subagent results.
+- [x] T-004.1 Define warm-pool lifecycle states.
+- [x] T-004.2 Define `task_id`, `epoch`, and `scope` assignment schema.
+- [x] T-004.3 Define restart/retire rules and the narrow reuse exception.
+- [x] T-004.4 Define parent integration output format for subagent results.
 
 ## T-005 Workflow Audit
 
 - [x] T-005.1 Audit initial `SKILL.md` wording against `skill-md-clarifier` criteria.
-- [ ] T-005.2 Audit the first real Coding Agents run against `SKILL.md`.
-- [ ] T-005.3 Record missing runner, hook, MCP, or app support as implementation backlog.
+- [x] T-005.2 Audit the first real Coding Agents run against `SKILL.md`.
+- [x] T-005.3 Record missing runner, hook, MCP, or app support as implementation backlog.
 
 ## T-006 Runnable MVP CLI
 
@@ -48,6 +48,6 @@
 - [x] REPO-INTAKE-001.1 Run Coding Agents intake for `/Users/suzukimakoto/plugins/coding-agents`.
 - [x] REPO-INTAKE-001.2 Generate or update `docs/codex` files.
 - [x] REPO-INTAKE-001.3 Create 14 scoped role assignments for epoch `E20260511-intake`.
-- [ ] REPO-INTAKE-001.4 Execute work inside scope `docs/codex/*.md only; read-only repo inspection`.
+- [x] REPO-INTAKE-001.4 Execute work inside scope `docs/codex/*.md only; read-only repo inspection`.
 - [x] REPO-INTAKE-001.5 Run verification and update `audit.md`.
 <!-- coding-agents-mvp:end -->
