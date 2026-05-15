@@ -6,7 +6,7 @@ behavior. It is not workflow state and must not be treated as a generated
 
 ## Confirmed Boundary
 
-Items 1-3 are Coding Agents self changes. Item 4 is external legacy cleanup.
+Items 1-4 are Coding Agents self changes. Item 5 is external legacy cleanup.
 
 1. State directory
    - Coding Agents runtime/workflow state belongs under `<git-root>/.coding-agents/`.
@@ -25,7 +25,17 @@ Items 1-3 are Coding Agents self changes. Item 4 is external legacy cleanup.
      packet, or process-result activity actually occurs.
    - Do not require `runner.md` for unrelated intake/spec/documentation flows.
 
-4. Legacy migration and cleanup
+4. Subagent lifecycle closure
+   - Subagents must return concise parent-integration material and must not stay
+     open waiting for more work after returning it.
+   - The parent is responsible for promptly closing or retiring no-longer-needed
+     subagents after completed result integration, timeout/failure/blocker
+     handling, stale premise or scope change, and before final report when no
+     further use is expected.
+   - Generated assignments, runner prompts, runner packets, and handoff material
+     must carry this lifecycle rule so future job state preserves it.
+
+5. Legacy migration and cleanup
    - Existing legacy locations are cleaned through an explicit migration workflow,
      not by silent deletion or broad automatic rewriting.
    - The migration workflow must perform a preflight backup before destructive or
@@ -48,6 +58,8 @@ Items 1-3 are Coding Agents self changes. Item 4 is external legacy cleanup.
 Future implementation work should preserve this split:
 
 - Source self-change work may update the Coding Agents source repository.
+- Generated job state must preserve subagent lifecycle closure and concise
+  integration-output rules.
 - Legacy cleanup work may inspect external target repositories but must remain
   dry-run until the user explicitly requests apply.
 - Migration apply and plugin cache refresh are separate user-confirmed steps.

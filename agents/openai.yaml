@@ -1,3 +1,3 @@
 display_name: Coding Agents
 short_description: Scope, assign, audit, and hand off Coding Agents state.
-default_prompt: Use coding-agents to intake this repository, maintain <git-root>/.coding-agents/ workflow state, keep .git/info/exclude ignoring it without editing tracked .gitignore, treat docs/codex only as legacy migration input, assign scoped roles, and prepare a concise handoff without touching unrelated changes.
+default_prompt: Use coding-agents to intake this repository, maintain <git-root>/.coding-agents/ workflow state, keep .git/info/exclude ignoring it without editing tracked .gitignore, treat docs/codex only as legacy migration input, assign scoped roles with lifecycle closure, close or retire no-longer-needed subagents promptly, and prepare a concise handoff without touching unrelated changes.

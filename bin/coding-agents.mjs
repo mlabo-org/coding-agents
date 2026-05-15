@@ -13,6 +13,10 @@ const STATE_DIR_NAME = ".coding-agents";
 const LEGACY_DOCS_SEGMENTS = ["docs", "codex"];
 const RUNNER_FILE = "runner.md";
 const DEFAULT_RUNNER_TIMEOUT_MS = 120000;
+const SUBAGENT_LIFECYCLE =
+  "Parent closes or retires this subagent promptly after result integration, timeout/failure/blocker handling, stale premise/scope change, or final report when no further use is expected.";
+const CHILD_RETURN_LIFECYCLE =
+  "Return concise parent-integration material and stop; do not stay open waiting for more work.";
 
 const ROLES = [
   "Intake",
@@ -285,6 +289,10 @@ Boundaries:
 - Do not edit ~/.codex/plugins/cache directly.
 - Do not claim success for unavailable, skipped, or failed checks.
 
+Lifecycle:
+- ${CHILD_RETURN_LIFECYCLE}
+- ${SUBAGENT_LIFECYCLE}
+
 Return exactly these sections, kept concise:
 - findings:
 - changed_files:
@@ -392,6 +400,7 @@ Read these planning files in order:
 Operational log:
 
 - \`runner.md\`: optional; created by \`assign\`, \`collect\`, or \`run\` only.
+- Subagents are active only for scoped work and must be closed or retired promptly when their result is integrated, blocked, failed, timed out, stale, or no longer needed.
 `;
 }
 
@@ -419,7 +428,8 @@ function renderTask(context) {
 ## Completion Conditions
 
 - Eight planning files exist in \`${STATE_DIR_NAME}\`.
-- 14 role assignments include \`role\`, \`status\`, \`task_id\`, \`epoch\`, \`scope\`, \`assignment\`, and \`expected_output\`.
+- 14 role assignments include \`role\`, \`status\`, \`task_id\`, \`epoch\`, \`scope\`, \`assignment\`, \`expected_output\`, and \`lifecycle\`.
+- Each generated assignment carries lifecycle guidance requiring concise integration material and prompt close/retire handling.
 - Handoff prompt is available for the next worker.
 `;
 }
@@ -447,6 +457,11 @@ function renderDecisions(context) {
 
 - accepted: this MVP writes only target project \`${STATE_DIR_NAME}\` state files.
 - impact: marketplace and plugin cache activation remain out of band.
+
+## D-${context.taskId}-003 Subagent Lifecycle Closure
+
+- accepted: subagents return concise parent-integration material and do not remain open waiting for more work.
+- impact: parent closes or retires no-longer-needed subagents after integration, timeout/failure/blocker handling, stale premise/scope change, and before final report.
 `;
 }
 
@@ -500,7 +515,8 @@ ${ROLES.map((role) => {
 - epoch: ${context.epoch}
 - scope: ${context.scope}
 - assignment: ${assignment}
-- expected_output: ${expectedOutput}`;
+- expected_output: ${expectedOutput}
+- lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
 }).join("\n\n")}
 `;
 }
@@ -517,6 +533,11 @@ You are a coding-agents worker for task \`${context.taskId}\`.
 
 Read \`${STATE_DIR_NAME}/README.md\`, then \`project.md\`, \`task.md\`, \`todo.md\`, \`decisions.md\`, \`assignments.md\`, \`audit.md\`, and \`runner.md\` if present.
 Preserve unrelated edits. Work only inside scope. Update \`${STATE_DIR_NAME}/audit.md\` with verification results before handoff.
+
+Subagent lifecycle:
+- Child workers return concise parent-integration material and stop instead of waiting for more work.
+- The parent closes or retires subagents after completed result integration, timeout/failure/blocker handling, stale premise/scope change, and before final report when no further use is expected.
+- If more work is needed after a stale premise, scope change, or failed verification, issue a fresh scoped assignment with current \`task_id\`, \`epoch\`, and \`scope\`.
 `;
 }
 
@@ -562,7 +583,8 @@ function renderAssignmentPacket(packet) {
 - epoch: ${packet.epoch}
 - scope: ${packet.scope}
 - assignment: ${packet.assignment}
-- expected_output: ${packet.expectedOutput}`;
+- expected_output: ${packet.expectedOutput}
+- lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
 }
 
 function renderIntegrationPacket(packet) {
@@ -579,7 +601,8 @@ function renderIntegrationPacket(packet) {
 - verification: ${packet.verification}
 - blockers: ${packet.blockers}
 - assumptions: ${packet.assumptions}
-- next: ${packet.next}`;
+- next: ${packet.next}
+- lifecycle: Parent integrates this packet, records any blocker or follow-up, then closes or retires the subagent unless an explicitly scoped continuation is required.`;
 }
 
 function renderOrchestrationSkeleton(packet) {
@@ -594,7 +617,8 @@ function renderOrchestrationSkeleton(packet) {
 - assignment: ${packet.assignment}
 - expected_output: ${packet.expectedOutput}
 - spawned: false
-- next: hand this assignment packet to an available subagent mechanism outside this MVP CLI`;
+- next: hand this assignment packet to an available subagent mechanism outside this MVP CLI
+- lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
 }
 
 function renderRunnerResult(result) {
@@ -614,7 +638,8 @@ function renderRunnerResult(result) {
 - assignment: ${result.assignment}
 - expected_output: ${result.expectedOutput}
 - summary: ${result.summary || "none"}
-- failure: ${result.failure}`;
+- failure: ${result.failure}
+- lifecycle: ${renderRunnerLifecycle(result)}`;
 }
 
 function appendRunnerEntry(cwd, heading, entry) {
@@ -625,6 +650,7 @@ function appendRunnerEntry(cwd, heading, entry) {
   const initial = `# Coding Agents Runner
 
 This file records CLI-issued assignments, parent-integration packets, process-orchestration skeletons, and process runner results.
+Subagents are closed or retired after integration, timeout/failure/blocker handling, stale premise/scope change, or final report when no further use is expected.
 `;
   const current = existsSync(runnerPath) ? readFileSync(runnerPath, "utf8") : initial;
   writeFileSync(runnerPath, appendUnderHeading(current, heading, entry), "utf8");
@@ -692,7 +718,7 @@ function validateRoleAssignments(text) {
 
   for (const role of ROLES) {
     const section = getRoleSection(text, role);
-    for (const field of ["role", "status", "task_id", "epoch", "scope", "assignment", "expected_output"]) {
+    for (const field of ["role", "status", "task_id", "epoch", "scope", "assignment", "expected_output", "lifecycle"]) {
       if (!getFieldValue(section, field)) {
         invalidFields.push(`${role}.${field}`);
       }
@@ -729,17 +755,21 @@ function validateRunnerPackets(text) {
       }
     }
     if (type === "assignment" || type === "process-orchestration-skeleton") {
-      for (const field of ["assignment", "expected_output"]) {
+      for (const field of ["assignment", "expected_output", "lifecycle"]) {
         if (!getFieldValue(section, field)) {
           invalidPackets.push(`${section.split("\n")[0].replace(/^### /, "")}.${field}`);
         }
       }
     }
-    if (type === "parent-integration" && !getFieldValue(section, "status")) {
-      invalidPackets.push(`${section.split("\n")[0].replace(/^### /, "")}.status`);
+    if (type === "parent-integration") {
+      for (const field of ["status", "lifecycle"]) {
+        if (!getFieldValue(section, field)) {
+          invalidPackets.push(`${section.split("\n")[0].replace(/^### /, "")}.${field}`);
+        }
+      }
     }
     if (type === "process-runner-result") {
-      for (const field of ["status", "runner", "spawned", "exit_code", "summary", "failure"]) {
+      for (const field of ["status", "runner", "spawned", "exit_code", "summary", "failure", "lifecycle"]) {
         if (!getFieldValue(section, field)) {
           invalidPackets.push(`${section.split("\n")[0].replace(/^### /, "")}.${field}`);
         }
@@ -751,6 +781,13 @@ function validateRunnerPackets(text) {
     return { results: [["ok", `runner packets valid (${checked} checked)`]], fatal: false };
   }
   return { results: [["warn", `missing or empty runner packet fields: ${invalidPackets.join(", ")}`]], fatal: true };
+}
+
+function renderRunnerLifecycle(result) {
+  if (result.status === "completed") {
+    return "Parent integrates the completed result, then closes or retires the subagent unless an explicitly scoped continuation is required.";
+  }
+  return "Parent records the failure, timeout, or blocker, retires this subagent context, and issues a fresh scoped assignment only if more work is still required.";
 }
 
 function upsertGenerated(filePath, body) {
@@ -957,7 +994,7 @@ Commands:
   collect  Record a parent-integration packet returned by a specialist.
   run      Record an assignment and orchestration skeleton by default; with --runner codex-cli, spawn codex exec and record normalized results.
   verify-assignments
-           Block missing or empty task_id, epoch, or scope fields in assignments and runner packets.
+           Block missing or empty task_id, epoch, scope, or lifecycle fields in assignments and runner packets.
   handoff  Print target .coding-agents/handoff.md.
   doctor   Check required workflow files, role assignments, isolation keys, and Git state.
 
@@ -966,6 +1003,7 @@ State:
   Commands that read or write workflow state require --cwd inside a Git worktree/root and fail when no Git root is available.
   Existing docs/codex directories are migration input or hints only; they are never operational state fallback or write targets.
   State writes add .coding-agents/ to .git/info/exclude; .gitignore is not edited.
+  Generated assignments, handoff prompts, and runner packets carry the rule that subagents return concise integration material and are closed or retired promptly when no longer needed.
 `);
 }
 
