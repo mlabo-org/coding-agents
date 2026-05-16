@@ -1,6 +1,6 @@
 ---
 name: coding-agents
-description: Use when the user wants the Coding Agents workflow or source CLI to intake a project cwd, maintain <git-root>/.coding-agents/ workflow state, assign/collect/run scoped specialist work with task_id/epoch/scope/lifecycle isolation, enforce prompt subagent close/retire handling, print a handoff prompt, audit workflow state, or migrate legacy docs/codex material. Trigger for explicit requests to initialize, plan, execute, coordinate, or audit coding work with the coding-agents plugin or source MVP. Do not use for generic coding edits, and do not treat docs/codex as current workflow state.
+description: Use when the user wants the Coding Agents workflow or source CLI to intake a jobsite/target cwd, maintain the target git root's <git-root>/.coding-agents/ workflow state even when invoked cross-repo, assign/collect/run scoped specialist work with task_id/epoch/scope/lifecycle isolation, enforce prompt subagent close/retire handling, print a handoff prompt, audit workflow state, or migrate legacy docs/codex material. Trigger for explicit requests to initialize, plan, execute, coordinate, or audit coding work with the coding-agents plugin or source MVP. Do not use for generic coding edits, and do not treat docs/codex as current workflow state.
 ---
 
 # Coding Agents
@@ -18,12 +18,15 @@ Codex は、本書の発火前提、作業手順、ツール境界、ファイ�
 
 ## Core Contract
 
-- Treat the current working directory as the jobsite. `cwd is jobsite` is the default intake rule unless the user names another project root.
-- Resolve the target repository Git root before writing workflow state. The active state root is `<git-root>/.coding-agents/`.
-- If no Git root can be resolved for the target jobsite, do not invent a state path. Report the blocker or ask for the intended repository root.
-- Before creating or updating `<git-root>/.coding-agents/`, ensure the target repository's `.git/info/exclude` ignores `.coding-agents/`. Add only that local exclude entry when it is missing.
+- Treat `invocation_cwd` as the directory where Codex or the source CLI was launched. Treat `jobsite`, `target cwd`, and `target-cwd` as the repository being planned, repaired, edited, or audited.
+- When the user does not name another target, `invocation_cwd` is the jobsite. This preserves the default `cwd is jobsite` intake rule.
+- When the user names a different repair/edit target, or the source CLI receives `--target-cwd <path>`, the named target is the jobsite. The invocation repository does not own workflow state for that target.
+- Resolve the jobsite's Git root before writing workflow state. The active state root is the jobsite repository's `<git-root>/.coding-agents/`, even when `invocation_cwd` is a plugin, tooling, or parent repository.
+- If the jobsite, target cwd, or target Git root is ambiguous, missing, outside the active task scope, or cannot be resolved, stop before state writes or edits. Report the ambiguity and ask for the intended target.
+- If no Git root can be resolved for the jobsite, do not invent a state path. Report the blocker or ask for the intended repository root.
+- Before creating or updating the jobsite repository's `<git-root>/.coding-agents/`, ensure that repository's `.git/info/exclude` ignores `.coding-agents/`. Add only that local exclude entry when it is missing.
 - Do not auto-edit the repository's tracked `.gitignore` to hide Coding Agents state. Edit tracked ignore policy only when the user explicitly requests that repository policy change.
-- The first action after trigger is project intake. Read the local `AGENTS.md` chain that applies to the jobsite when available, inspect the repository shape, check Git state, resolve `<git-root>`, inspect existing `.coding-agents` state, inspect `.git/info/exclude`, and identify legacy `docs/codex` material only as migration input.
+- The first action after trigger is target resolution followed by project intake. Determine `invocation_cwd`, resolve the jobsite from the explicit target or default cwd rule, read the local `AGENTS.md` chain that applies to the jobsite when available, inspect the jobsite repository shape, check Git state, resolve `<git-root>`, inspect existing `.coding-agents` state, inspect `.git/info/exclude`, and identify legacy `docs/codex` material only as migration input.
 - During source upgrade work, direct execution of the source CLI runs source-tree behavior: `node /Users/suzukimakoto/plugins/coding-agents/bin/coding-agents.mjs ...`. This validates source behavior, not installed plugin activation.
 - Installed plugin activation is controlled by refreshing the plugin cache from validated source and then restarting Codex or opening a new thread when required. Do not claim a source CLI run proves cached plugin activation.
 - Maintain `<git-root>/.coding-agents/` as the workflow SSOT for the active job.
@@ -66,40 +69,43 @@ Codex は、本書の発火前提、作業手順、ツール境界、ファイ�
 
 Use the source CLI when the user wants to test source-tree behavior before plugin cache activation, or when the active task is a source upgrade of the Coding Agents plugin itself.
 
-1. Resolve the target jobsite path.
-2. Resolve the target Git root. Confirm `<git-root>/.coding-agents/` as the workflow state root before state writes.
-3. Ensure `.git/info/exclude` ignores `.coding-agents/`; do not edit tracked `.gitignore` unless explicitly requested.
-4. Run intake with explicit isolation keys:
-   `node /Users/suzukimakoto/plugins/coding-agents/bin/coding-agents.mjs intake --cwd <jobsite> --task <task> --task-id <id> --epoch <epoch> --scope <scope>`.
-5. Run doctor:
-   `node /Users/suzukimakoto/plugins/coding-agents/bin/coding-agents.mjs doctor --cwd <jobsite>`.
-6. Print handoff when needed:
-   `node /Users/suzukimakoto/plugins/coding-agents/bin/coding-agents.mjs handoff --cwd <jobsite> --task-id <id>`.
-7. For `assign`, `collect`, `run`, or `orchestrate`, record operational packets in `.coding-agents/runner.md`.
-8. Ensure generated assignments, runner prompts, runner packets, and handoff material carry the lifecycle rule: subagents return concise integration material, stop waiting for more work, and are closed or retired promptly when no longer needed.
-9. Treat marketplace registration, `~/.codex/plugins/cache/` refresh, and Codex restart/new-thread activation as separate work unless the user explicitly includes them.
+1. Record `invocation_cwd` as the launch directory.
+2. Resolve the target jobsite path. Use `--target-cwd <jobsite>` for explicit cross-repo target selection; if no target is provided, use `invocation_cwd` as the jobsite.
+3. Resolve the jobsite Git root. Confirm the jobsite repository's `<git-root>/.coding-agents/` as the workflow state root before state writes.
+4. Ensure the jobsite repository's `.git/info/exclude` ignores `.coding-agents/`; do not edit tracked `.gitignore` unless explicitly requested.
+5. Run intake with explicit isolation keys:
+   `node /Users/suzukimakoto/plugins/coding-agents/bin/coding-agents.mjs intake --target-cwd <jobsite> --task <task> --task-id <id> --epoch <epoch> --scope <scope>`.
+6. Run doctor:
+   `node /Users/suzukimakoto/plugins/coding-agents/bin/coding-agents.mjs doctor --target-cwd <jobsite>`.
+7. Print handoff when needed:
+   `node /Users/suzukimakoto/plugins/coding-agents/bin/coding-agents.mjs handoff --target-cwd <jobsite> --task-id <id>`.
+8. For `assign`, `collect`, `run`, or `orchestrate`, record operational packets in the jobsite repository's `.coding-agents/runner.md`.
+9. Ensure generated assignments, runner prompts, runner packets, and handoff material carry the lifecycle rule: subagents return concise integration material, stop waiting for more work, and are closed or retired promptly when no longer needed.
+10. Treat marketplace registration, `~/.codex/plugins/cache/` refresh, and Codex restart/new-thread activation as separate work unless the user explicitly includes them.
 
 If source CLI output still names legacy `docs/codex`, treat that as source implementation drift to report or fix under the active task scope. Do not let legacy output redefine the current skill contract.
 
 ## Workflow
 
-1. Resolve the jobsite from cwd unless the user explicitly names another root.
-2. Resolve `<git-root>` and run project intake before editing: repository status, applicable instructions, current `.coding-agents` state, `.git/info/exclude` status, legacy `docs/codex` migration input, source/cache boundaries, and risk level.
-3. Before workflow state writes, create or update the local `.git/info/exclude` entry for `.coding-agents/` when missing. Do not update tracked `.gitignore`.
-4. Create or update the active `.coding-agents` files before implementation when workflow state is missing or stale.
-5. Initialize the empty specialist warm pool and define the first 14 role assignments with `task_id`, `epoch`, `scope`, and `lifecycle`.
-6. Execute or coordinate work according to `.coding-agents/todo.md`.
-7. Record user-confirmed decisions in `.coding-agents/decisions.md` and update `.coding-agents/task.md` when scope changes.
-8. Create or update `.coding-agents/runner.md` only for `assign`, `collect`, `run`, `orchestrate`, parent-integration packet, or process-result activity.
-9. After every completed result integration, timeout/failure/blocker handling, stale premise, or scope change, close or retire subagents that are no longer needed before issuing new assignments.
-10. Verify implementation against the accepted decisions and completion conditions.
-11. Before the final report, confirm no subagent remains open unless the user explicitly asked to keep it for a continued assignment.
-12. Append audit results to `.coding-agents/audit.md`, including checks not run and why.
-13. Report final status with changed files, verification, open risks, and next TODOs.
+1. Record `invocation_cwd`, then resolve the jobsite from the explicit target (`--target-cwd`, user-named project root, or task-owned target path) or from cwd when no target is named.
+2. If target selection remains ambiguous, stop before edits or workflow state writes and ask for the intended jobsite.
+3. Resolve the jobsite repository's `<git-root>` and run project intake before editing: repository status, applicable instructions, current `.coding-agents` state, `.git/info/exclude` status, legacy `docs/codex` migration input, source/cache boundaries, and risk level.
+4. Before workflow state writes, create or update the jobsite repository's local `.git/info/exclude` entry for `.coding-agents/` when missing. Do not update tracked `.gitignore`.
+5. Create or update the active `.coding-agents` files before implementation when workflow state is missing or stale.
+6. Initialize the empty specialist warm pool and define the first 14 role assignments with `task_id`, `epoch`, `scope`, and `lifecycle`.
+7. Execute or coordinate work according to `.coding-agents/todo.md`.
+8. Record user-confirmed decisions in `.coding-agents/decisions.md` and update `.coding-agents/task.md` when scope changes.
+9. Create or update `.coding-agents/runner.md` only for `assign`, `collect`, `run`, `orchestrate`, parent-integration packet, or process-result activity.
+10. After every completed result integration, timeout/failure/blocker handling, stale premise, or scope change, close or retire subagents that are no longer needed before issuing new assignments.
+11. Verify implementation against the accepted decisions and completion conditions.
+12. Before the final report, confirm no subagent remains open unless the user explicitly asked to keep it for a continued assignment.
+13. Append audit results to `.coding-agents/audit.md`, including checks not run and why.
+14. Report final status with changed files, verification, open risks, and next TODOs.
 
 ## File Boundaries
 
 - Edit jobsite files only inside the active task scope.
+- In cross-repo invocation, do not edit the invocation repository merely because Codex or the source CLI was launched there. Edit the invocation repository only when it is also the resolved jobsite or is explicitly inside the active task scope.
 - Treat plugin source directories as source of truth. Do not patch `~/.codex/plugins/cache/` as the primary edit target.
 - Do not edit `~/.codex/plugins/cache/`, marketplace files, or plugin activation state unless the user explicitly includes that in the active task scope.
 - Do not auto-edit tracked `.gitignore` to hide `.coding-agents/`. Use target `.git/info/exclude` for the local workflow-state ignore rule.

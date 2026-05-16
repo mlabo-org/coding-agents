@@ -10,8 +10,19 @@ Items 1-4 are Coding Agents self changes. Item 5 is external legacy cleanup.
 
 1. State directory
    - Coding Agents runtime/workflow state belongs under `<git-root>/.coding-agents/`.
-   - The state directory is resolved from the target repository git root, not from
-     the plugin source repository unless the plugin source repo is the target.
+   - The state directory is resolved from the jobsite/target repository git root,
+     not from the invocation repository or plugin source repository unless that
+     repository is also the target.
+   - `invocation_cwd` is the directory where Codex or the source CLI was launched.
+     `jobsite`, `target cwd`, and `target-cwd` identify the repository being
+     planned, repaired, edited, or audited.
+   - If no target is named, `invocation_cwd` remains the jobsite. This preserves
+     the default `cwd is jobsite` behavior.
+   - If the user names another target, or the CLI receives `--target-cwd <path>`,
+     the named target becomes the jobsite and owns `.coding-agents/`.
+   - If target selection or the target git root is ambiguous, missing, outside
+     the active scope, or unresolved, stop before edits or workflow state writes
+     and ask for the intended target.
 
 2. Git non-pollution
    - Generated local state must avoid polluting the target repository.
@@ -58,6 +69,10 @@ Items 1-4 are Coding Agents self changes. Item 5 is external legacy cleanup.
 Future implementation work should preserve this split:
 
 - Source self-change work may update the Coding Agents source repository.
+- Cross-repo source invocation must keep source/cache files separate from the
+  target repository's generated `.coding-agents/` state. Running the source CLI
+  from the plugin repository does not make the plugin repository the state owner
+  when `--target-cwd` or an explicit target points elsewhere.
 - Generated job state must preserve subagent lifecycle closure and concise
   integration-output rules.
 - Legacy cleanup work may inspect external target repositories but must remain

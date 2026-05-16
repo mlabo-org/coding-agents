@@ -95,17 +95,19 @@ function parseArgs(argv) {
 }
 
 function intake(args) {
-  const cwd = requireCwd(args.cwd);
+  const commandContext = resolveCommandContext(args);
   const task = requireArg(args.task, "--task");
   const taskId = requireArg(args.taskId, "--task-id");
   const epoch = requireArg(args.epoch, "--epoch");
   const scope = requireArg(args.scope, "--scope");
-  const state = resolveWorkflowState(cwd);
+  const state = resolveWorkflowState(commandContext.targetCwd);
   prepareStateWrite(state);
   mkdirSync(state.stateDir, { recursive: true });
 
   const context = {
-    cwd,
+    cwd: commandContext.targetCwd,
+    invocationCwd: commandContext.invocationCwd,
+    targetCwd: commandContext.targetCwd,
     task,
     taskId,
     epoch,
@@ -113,7 +115,7 @@ function intake(args) {
     stateDir: state.stateDir,
     gitRoot: state.gitRoot,
     timestamp: new Date().toISOString(),
-    gitStatus: readGitStatus(cwd),
+    gitStatus: readGitStatus(commandContext.targetCwd),
   };
 
   for (const [file, body] of Object.entries(renderDocs(context))) {
@@ -129,9 +131,9 @@ function intake(args) {
 }
 
 function handoff(args) {
-  const cwd = requireCwd(args.cwd);
+  const commandContext = resolveCommandContext(args);
   requireArg(args.taskId, "--task-id");
-  const state = resolveWorkflowState(cwd);
+  const state = resolveWorkflowState(commandContext.targetCwd);
   printLegacyHints(state);
   const handoffPath = path.join(state.stateDir, "handoff.md");
   if (!existsSync(handoffPath)) {
@@ -141,9 +143,9 @@ function handoff(args) {
 }
 
 function assign(args) {
-  const cwd = requireCwd(args.cwd);
-  const packet = requireAssignmentPacket(args);
-  appendRunnerEntry(cwd, "Issued Assignments", renderAssignmentPacket(packet));
+  const commandContext = resolveCommandContext(args);
+  const packet = requireAssignmentPacket(args, commandContext);
+  appendRunnerEntry(commandContext, "Issued Assignments", renderAssignmentPacket(packet));
   console.log(`ok assignment: ${packet.role}`);
   console.log(`ok task_id: ${packet.taskId}`);
   console.log(`ok epoch: ${packet.epoch}`);
@@ -151,22 +153,22 @@ function assign(args) {
 }
 
 function collect(args) {
-  const cwd = requireCwd(args.cwd);
-  const packet = requireIntegrationPacket(args);
-  appendRunnerEntry(cwd, "Parent Integration Packets", renderIntegrationPacket(packet));
+  const commandContext = resolveCommandContext(args);
+  const packet = requireIntegrationPacket(args, commandContext);
+  appendRunnerEntry(commandContext, "Parent Integration Packets", renderIntegrationPacket(packet));
   console.log(`ok parent-integration: ${packet.role}`);
   console.log(`ok status: ${packet.status}`);
   console.log(`ok task_id: ${packet.taskId}`);
 }
 
 function run(args) {
-  const cwd = requireCwd(args.cwd);
-  const packet = requireAssignmentPacket(args);
-  appendRunnerEntry(cwd, "Issued Assignments", renderAssignmentPacket(packet));
+  const commandContext = resolveCommandContext(args);
+  const packet = requireAssignmentPacket(args, commandContext);
+  appendRunnerEntry(commandContext, "Issued Assignments", renderAssignmentPacket(packet));
 
   if (args.runner) {
-    const result = runWithRunner(cwd, packet, args);
-    appendRunnerEntry(cwd, "Process Runner Results", renderRunnerResult(result));
+    const result = runWithRunner(commandContext, packet, args);
+    appendRunnerEntry(commandContext, "Process Runner Results", renderRunnerResult(result));
     console.log(`ok runner: ${result.runner}`);
     console.log(`ok spawned: ${result.spawned}`);
     console.log(`ok exit_code: ${formatExitCode(result.exitCode)}`);
@@ -178,25 +180,26 @@ function run(args) {
     return;
   }
 
-  appendRunnerEntry(cwd, "Process Orchestration Skeletons", renderOrchestrationSkeleton(packet));
+  appendRunnerEntry(commandContext, "Process Orchestration Skeletons", renderOrchestrationSkeleton(packet));
   console.log(`ok run skeleton: ${packet.role}`);
   console.log("ok spawned: false");
   console.log("ok note: real process orchestration is deferred; runner recorded the scoped assignment and skeleton only");
 }
 
-function runWithRunner(cwd, packet, args) {
+function runWithRunner(commandContext, packet, args) {
   const runner = singleLine(args.runner);
   if (runner !== "codex-cli") {
     throw new CliError(`unknown runner: ${runner}; expected codex-cli`, 1);
   }
-  return runCodexCli(cwd, packet, args);
+  return runCodexCli(commandContext, packet, args);
 }
 
-function runCodexCli(cwd, packet, args) {
+function runCodexCli(commandContext, packet, args) {
   const timeoutMs = parsePositiveInt(args.timeoutMs || DEFAULT_RUNNER_TIMEOUT_MS, "--timeout-ms");
   const tempDir = mkdtempSync(path.join(os.tmpdir(), "coding-agents-runner-"));
   const outputPath = path.join(tempDir, "last-message.md");
   const prompt = renderRunnerPrompt(packet);
+  const cwd = commandContext.targetCwd;
   const codexArgs = [
     "exec",
     "--cd",
@@ -249,6 +252,8 @@ function normalizeCodexResult(packet, context) {
     taskId: packet.taskId,
     epoch: packet.epoch,
     scope: packet.scope,
+    invocationCwd: packet.invocationCwd,
+    targetCwd: packet.targetCwd,
     runner,
     status,
     spawned: !unavailable,
@@ -278,11 +283,14 @@ role: ${packet.role}
 task_id: ${packet.taskId}
 epoch: ${packet.epoch}
 scope: ${packet.scope}
+invocation_cwd: ${packet.invocationCwd}
+target_cwd: ${packet.targetCwd}
 assignment: ${packet.assignment}
 expected_output: ${packet.expectedOutput}
 
 Boundaries:
-- Treat the process cwd as the jobsite.
+- Treat the process cwd as the target/jobsite cwd: ${packet.targetCwd}.
+- Do not treat the invocation cwd as the workflow state root unless it is the same as the target/jobsite cwd.
 - Stay inside the declared scope.
 - Preserve unrelated user or worker changes.
 - Do not commit.
@@ -304,8 +312,8 @@ Return exactly these sections, kept concise:
 }
 
 function verifyAssignments(args) {
-  const cwd = requireCwd(args.cwd);
-  const state = resolveWorkflowState(cwd);
+  const commandContext = resolveCommandContext(args);
+  const state = resolveWorkflowState(commandContext.targetCwd);
   const { results, fatal } = validateAssignmentFiles(state.stateDir);
   printLegacyHints(state);
   for (const [level, message] of results) {
@@ -315,11 +323,14 @@ function verifyAssignments(args) {
 }
 
 function doctor(args) {
-  const cwd = requireCwd(args.cwd);
-  const state = resolveWorkflowState(cwd);
+  const commandContext = resolveCommandContext(args);
+  const state = resolveWorkflowState(commandContext.targetCwd);
   const stateDir = state.stateDir;
   const results = [];
   let fatal = false;
+
+  results.push(["ok", `invocation cwd: ${commandContext.invocationCwd}`]);
+  results.push(["ok", `target cwd: ${commandContext.targetCwd}`]);
 
   if (!existsSync(stateDir)) {
     results.push(["warn", `missing workflow state directory: ${stateDir}`]);
@@ -353,7 +364,7 @@ function doctor(args) {
     }
   }
 
-  const gitStatus = readGitStatus(cwd);
+  const gitStatus = readGitStatus(commandContext.targetCwd);
   if (gitStatus.ok) {
     const status = gitStatus.output.trim();
     if (status) results.push(["warn", `git has uncommitted changes (${status.split("\n").length} line(s))`]);
@@ -407,7 +418,9 @@ Operational log:
 function renderProject(context) {
   return `# Project Intake
 
-- cwd: ${context.cwd}
+- invocation_cwd: ${context.invocationCwd}
+- target_cwd: ${context.targetCwd}
+- jobsite_cwd: ${context.targetCwd}
 - state_dir: ${context.stateDir}
 - git_root: ${context.gitRoot || "unavailable"}
 - git_status: ${context.gitStatus.ok ? summarizeGit(context.gitStatus.output) : `unavailable (${context.gitStatus.error})`}
@@ -472,7 +485,9 @@ function renderAudit(context) {
 
 - status: ok
 - generated_at: ${context.timestamp}
-- cwd: ${context.cwd}
+- invocation_cwd: ${context.invocationCwd}
+- target_cwd: ${context.targetCwd}
+- jobsite_cwd: ${context.targetCwd}
 - task_id: ${context.taskId}
 - epoch: ${context.epoch}
 - scope: ${context.scope}
@@ -526,7 +541,9 @@ function renderHandoff(context) {
 
 You are a coding-agents worker for task \`${context.taskId}\`.
 
-- cwd: ${context.cwd}
+- invocation_cwd: ${context.invocationCwd}
+- target_cwd: ${context.targetCwd}
+- jobsite_cwd: ${context.targetCwd}
 - task: ${context.task}
 - epoch: ${context.epoch}
 - scope: ${context.scope}
@@ -541,7 +558,7 @@ Subagent lifecycle:
 `;
 }
 
-function requireAssignmentPacket(args) {
+function requireAssignmentPacket(args, commandContext) {
   return {
     type: "assignment",
     timestamp: new Date().toISOString(),
@@ -550,12 +567,14 @@ function requireAssignmentPacket(args) {
     taskId: requireArg(args.taskId, "--task-id"),
     epoch: requireArg(args.epoch, "--epoch"),
     scope: requireArg(args.scope, "--scope"),
+    invocationCwd: commandContext.invocationCwd,
+    targetCwd: commandContext.targetCwd,
     assignment: singleLine(requireArg(args.assignment, "--assignment")),
     expectedOutput: singleLine(requireArg(args.expectedOutput, "--expected-output")),
   };
 }
 
-function requireIntegrationPacket(args) {
+function requireIntegrationPacket(args, commandContext) {
   return {
     type: "parent-integration",
     timestamp: new Date().toISOString(),
@@ -564,6 +583,8 @@ function requireIntegrationPacket(args) {
     taskId: requireArg(args.taskId, "--task-id"),
     epoch: requireArg(args.epoch, "--epoch"),
     scope: requireArg(args.scope, "--scope"),
+    invocationCwd: commandContext.invocationCwd,
+    targetCwd: commandContext.targetCwd,
     findings: singleLine(args.findings || "none"),
     changedFiles: singleLine(args.changedFiles || args.proposedFiles || "none"),
     verification: singleLine(args.verification || "not run"),
@@ -582,6 +603,8 @@ function renderAssignmentPacket(packet) {
 - task_id: ${packet.taskId}
 - epoch: ${packet.epoch}
 - scope: ${packet.scope}
+- invocation_cwd: ${packet.invocationCwd}
+- target_cwd: ${packet.targetCwd}
 - assignment: ${packet.assignment}
 - expected_output: ${packet.expectedOutput}
 - lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
@@ -596,6 +619,8 @@ function renderIntegrationPacket(packet) {
 - task_id: ${packet.taskId}
 - epoch: ${packet.epoch}
 - scope: ${packet.scope}
+- invocation_cwd: ${packet.invocationCwd}
+- target_cwd: ${packet.targetCwd}
 - findings: ${packet.findings}
 - changed_files: ${packet.changedFiles}
 - verification: ${packet.verification}
@@ -614,6 +639,8 @@ function renderOrchestrationSkeleton(packet) {
 - task_id: ${packet.taskId}
 - epoch: ${packet.epoch}
 - scope: ${packet.scope}
+- invocation_cwd: ${packet.invocationCwd}
+- target_cwd: ${packet.targetCwd}
 - assignment: ${packet.assignment}
 - expected_output: ${packet.expectedOutput}
 - spawned: false
@@ -630,6 +657,8 @@ function renderRunnerResult(result) {
 - task_id: ${result.taskId}
 - epoch: ${result.epoch}
 - scope: ${result.scope}
+- invocation_cwd: ${result.invocationCwd}
+- target_cwd: ${result.targetCwd}
 - runner: ${result.runner}
 - spawned: ${result.spawned}
 - exit_code: ${formatExitCode(result.exitCode)}
@@ -642,8 +671,8 @@ function renderRunnerResult(result) {
 - lifecycle: ${renderRunnerLifecycle(result)}`;
 }
 
-function appendRunnerEntry(cwd, heading, entry) {
-  const state = resolveWorkflowState(cwd);
+function appendRunnerEntry(commandContext, heading, entry) {
+  const state = resolveWorkflowState(commandContext.targetCwd);
   prepareStateWrite(state);
   mkdirSync(state.stateDir, { recursive: true });
   const runnerPath = path.join(state.stateDir, RUNNER_FILE);
@@ -820,7 +849,7 @@ function resolveWorkflowState(cwd) {
   const gitRoot = resolveGitRoot(cwd);
   if (!gitRoot) {
     throw new CliError(
-      `workflow state requires a Git worktree: ${cwd} is not inside a Git worktree/root; run with --cwd inside a Git repository`,
+      `workflow state requires a Git worktree: ${cwd} is not inside a Git worktree/root; run with --cwd inside a Git repository or set --target-cwd to the target repository`,
       1,
     );
   }
@@ -937,11 +966,21 @@ function printLegacyHints(state) {
   }
 }
 
-function requireCwd(value) {
-  const cwd = path.resolve(requireArg(value, "--cwd"));
-  if (!existsSync(cwd)) throw new CliError(`cwd does not exist: ${cwd}`, 1);
-  if (!statSync(cwd).isDirectory()) throw new CliError(`cwd is not a directory: ${cwd}`, 1);
-  return cwd;
+function resolveCommandContext(args) {
+  const invocationCwd = args.cwd ? requireDirectory(args.cwd, "--cwd") : requireDirectory(process.cwd(), "process cwd");
+  const targetCwd = args.targetCwd ? requireDirectory(args.targetCwd, "--target-cwd") : requireDirectory(args.cwd, "--cwd");
+  return {
+    invocationCwd,
+    targetCwd,
+  };
+}
+
+function requireDirectory(value, label) {
+  if (!value || !String(value).trim()) throw new CliError(`missing required argument: ${label}`, 1);
+  const directory = path.resolve(String(value));
+  if (!existsSync(directory)) throw new CliError(`${label} does not exist: ${directory}`, 1);
+  if (!statSync(directory).isDirectory()) throw new CliError(`${label} is not a directory: ${directory}`, 1);
+  return directory;
 }
 
 function requireArg(value, flag) {
@@ -979,20 +1018,21 @@ function printHelp() {
   console.log(`coding-agents MVP CLI
 
 Usage:
-  node bin/coding-agents.mjs intake --cwd <path> --task <text> --task-id <id> --epoch <epoch> --scope <scope>
-  node bin/coding-agents.mjs assign --cwd <path> --role <role> --task-id <id> --epoch <epoch> --scope <scope> --assignment <text> --expected-output <text>
-  node bin/coding-agents.mjs collect --cwd <path> --role <role> --task-id <id> --epoch <epoch> --scope <scope> --status <status> [--findings <text>] [--changed-files <text>] [--verification <text>] [--blockers <text>] [--assumptions <text>] [--next <text>]
-  node bin/coding-agents.mjs run --cwd <path> --role <role> --task-id <id> --epoch <epoch> --scope <scope> --assignment <text> --expected-output <text> [--runner codex-cli] [--timeout-ms <ms>]
-  node bin/coding-agents.mjs verify-assignments --cwd <path>
-  node bin/coding-agents.mjs handoff --cwd <path> --task-id <id>
-  node bin/coding-agents.mjs doctor --cwd <path>
+  node bin/coding-agents.mjs intake [--cwd <path>] [--target-cwd <path>] --task <text> --task-id <id> --epoch <epoch> --scope <scope>
+  node bin/coding-agents.mjs assign [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> --assignment <text> --expected-output <text>
+  node bin/coding-agents.mjs collect [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> --status <status> [--findings <text>] [--changed-files <text>] [--verification <text>] [--blockers <text>] [--assumptions <text>] [--next <text>]
+  node bin/coding-agents.mjs run|orchestrate [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> --assignment <text> --expected-output <text> [--runner codex-cli] [--timeout-ms <ms>]
+  node bin/coding-agents.mjs verify-assignments [--cwd <path>] [--target-cwd <path>]
+  node bin/coding-agents.mjs handoff [--cwd <path>] [--target-cwd <path>] --task-id <id>
+  node bin/coding-agents.mjs doctor [--cwd <path>] [--target-cwd <path>]
   node bin/coding-agents.mjs --help
 
 Commands:
   intake   Create or update target .coding-agents workflow files.
   assign   Record a scoped specialist assignment in .coding-agents/runner.md.
   collect  Record a parent-integration packet returned by a specialist.
-  run      Record an assignment and orchestration skeleton by default; with --runner codex-cli, spawn codex exec and record normalized results.
+  run/orchestrate
+           Record an assignment and orchestration skeleton by default; with --runner codex-cli, spawn codex exec and record normalized results.
   verify-assignments
            Block missing or empty task_id, epoch, scope, or lifecycle fields in assignments and runner packets.
   handoff  Print target .coding-agents/handoff.md.
@@ -1000,7 +1040,10 @@ Commands:
 
 State:
   The workflow state directory is <git-root>/.coding-agents.
-  Commands that read or write workflow state require --cwd inside a Git worktree/root and fail when no Git root is available.
+  Commands that read or write workflow state resolve state from the target/jobsite cwd and fail when no target Git root is available.
+  Provide either --cwd <path> or --target-cwd <path>; when both are omitted, process cwd is the invocation cwd only and no target/jobsite cwd is available.
+  Without --target-cwd, --cwd remains the target/jobsite cwd for backwards compatibility.
+  With --target-cwd, --cwd records the invocation cwd (or process cwd when omitted) while state and runner execution use --target-cwd.
   Existing docs/codex directories are migration input or hints only; they are never operational state fallback or write targets.
   State writes add .coding-agents/ to .git/info/exclude; .gitignore is not edited.
   Generated assignments, handoff prompts, and runner packets carry the rule that subagents return concise integration material and are closed or retired promptly when no longer needed.
