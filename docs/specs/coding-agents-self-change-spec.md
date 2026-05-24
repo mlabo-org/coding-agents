@@ -43,6 +43,17 @@ Items 1-5 are Coding Agents self changes. Item 6 is external legacy cleanup.
      subagents after completed result integration, timeout/failure/blocker
      handling, stale premise or scope change, and before final report when no
      further use is expected.
+   - `wait_agent` and `agent_wait` are not required for completion detection and
+     must not be treated as the default way to know whether a subagent finished.
+     The narrow exception is an explicit user request for synchronous waiting.
+   - When subagent output is not yet available, the parent holds only the
+     result-dependent branch, states the blocker and resume condition, and keeps
+     conversation, additional instruction intake, and independent work open.
+   - The parent must not fabricate, summarize, integrate, or make decisions from
+     unavailable subagent results.
+   - When a completion notification or actual subagent result arrives, the parent
+     collects, evaluates, integrates or rejects the result, and closes or retires
+     the subagent when no further scoped use remains.
    - Generated assignments, runner prompts, runner packets, and handoff material
      must carry this lifecycle rule so future job state preserves it.
 
@@ -88,7 +99,12 @@ Future implementation work should preserve this split:
   from the plugin repository does not make the plugin repository the state owner
   when `--target-cwd` or an explicit target points elsewhere.
 - Generated job state must preserve subagent lifecycle closure, concise
-  integration-output rules, and debug root-cause completion requirements.
+  integration-output rules, no-wait parent UX, and debug root-cause completion
+  requirements.
+- No-wait parent UX means result-dependent work can be held while missing output
+  is named as a blocker, but the parent keeps conversation, additional
+  instruction intake, and independent work open; unavailable results are never
+  fabricated or integrated.
 - Stale generated state must be normalized explicitly before verification is
   treated as current.
 - Legacy cleanup work may inspect external target repositories but must remain
