@@ -17,6 +17,8 @@ const SUBAGENT_LIFECYCLE =
   "Parent closes or retires this subagent promptly after result integration, timeout/failure/blocker handling, stale premise/scope change, or final report when no further use is expected.";
 const CHILD_RETURN_LIFECYCLE =
   "Return concise parent-integration material and stop; do not stay open waiting for more work.";
+const DEBUG_INTEGRITY =
+  "For debug or repair work, identify root cause and make the intended outcome succeed; log-only, fallback-only, skip-only, failure-output-only, or return-to-main-loop-only changes are not completion.";
 
 const ROLES = [
   "Intake",
@@ -296,6 +298,7 @@ Boundaries:
 - Do not commit.
 - Do not edit ~/.codex/plugins/cache directly.
 - Do not claim success for unavailable, skipped, or failed checks.
+- ${DEBUG_INTEGRITY}
 
 Lifecycle:
 - ${CHILD_RETURN_LIFECYCLE}
@@ -412,6 +415,7 @@ Operational log:
 
 - \`runner.md\`: optional; created by \`assign\`, \`collect\`, or \`run\` only.
 - Subagents are active only for scoped work and must be closed or retired promptly when their result is integrated, blocked, failed, timed out, stale, or no longer needed.
+- ${DEBUG_INTEGRITY}
 `;
 }
 
@@ -443,6 +447,7 @@ function renderTask(context) {
 - Eight planning files exist in \`${STATE_DIR_NAME}\`.
 - 14 role assignments include \`role\`, \`status\`, \`task_id\`, \`epoch\`, \`scope\`, \`assignment\`, \`expected_output\`, and \`lifecycle\`.
 - Each generated assignment carries lifecycle guidance requiring concise integration material and prompt close/retire handling.
+- Debug or repair work is not complete until root cause is identified, fixed, and verified against the intended outcome.
 - Handoff prompt is available for the next worker.
 `;
 }
@@ -475,6 +480,11 @@ function renderDecisions(context) {
 
 - accepted: subagents return concise parent-integration material and do not remain open waiting for more work.
 - impact: parent closes or retires no-longer-needed subagents after integration, timeout/failure/blocker handling, stale premise/scope change, and before final report.
+
+## D-${context.taskId}-004 Debugging Integrity
+
+- accepted: debug or repair work must identify root cause and restore the intended outcome.
+- impact: log-only, fallback-only, skip-only, failure-output-only, and return-to-main-loop-only changes are temporary containment at most and must not be accepted as completion.
 `;
 }
 
@@ -497,28 +507,34 @@ function renderAudit(context) {
 
 - Run implementation checks for the active task.
 - Record skipped checks with reasons.
+- For debug or repair work, record root cause, fix, and verification that the intended outcome now succeeds.
 `;
 }
 
 function renderAssignments(context) {
   const assignments = {
-    Intake: ["assigned", "Confirm project instructions, cwd, task, and existing workflow state.", "Intake summary with blockers."],
+    Intake: ["assigned", "Confirm project instructions, cwd, task, existing workflow state, and whether this is debug or repair work.", "Intake summary with blockers and debug classification."],
     "Repo Mapper": ["assigned", "Map repository structure and likely edit boundaries.", "Repo map and source boundaries."],
-    Requirements: ["assigned", "Extract explicit requirements and non-goals.", "Requirement list with ambiguity notes."],
+    Requirements: ["assigned", "Extract explicit requirements, non-goals, expected outcome, and actual failure when debugging.", "Requirement list with ambiguity notes and failure contract if applicable."],
     Planner: ["assigned", "Convert requirements into an executable task sequence.", "Plan with ordered checkpoints."],
-    Architect: ["assigned", "Identify design constraints and integration points.", "Architecture notes and risk points."],
-    Implementer: ["assigned", "Make scoped code or document changes when requested.", "Changed files and implementation notes."],
-    "Test Runner": ["assigned", "Run allowed verification commands.", "Verification output and skipped checks."],
-    Reviewer: ["assigned", "Review diffs for regressions and missing requirements.", "Findings ordered by severity."],
+    Architect: ["assigned", "Identify design constraints, integration points, and likely failure point for debug work.", "Architecture notes, risk points, and failure-path notes."],
+    Implementer: ["assigned", "Make scoped code or document changes when requested; for debug work, fix the root cause instead of masking failure.", "Changed files, implementation notes, and root-cause fix notes when applicable."],
+    "Test Runner": ["assigned", "Run allowed verification commands; for debug work, verify the intended outcome now succeeds.", "Verification output, skipped checks, and outcome evidence."],
+    Reviewer: ["assigned", "Review diffs for regressions, missing requirements, and log-only or fallback-only debug completion.", "Findings ordered by severity."],
     "Risk Guard": ["assigned", "Check destructive actions, external sending, secrets, and scope drift.", "Risk assessment and required stops."],
     "Docs Keeper": ["assigned", `Keep ${STATE_DIR_NAME} task, todo, decisions, and audit current.`, "Updated docs summary."],
     UX: ["assigned", "Assess user-facing workflow clarity.", "UX notes and friction points."],
     Dependency: ["assigned", "Check dependency boundaries and avoid unapproved installs.", "Dependency impact notes."],
     DevOps: ["assigned", "Check runnable commands, Git state, and release boundaries.", "Operational readiness notes."],
-    Auditor: ["assigned", "Compare outcomes against task_id, epoch, scope, and completion conditions.", "Final audit result."],
+    Auditor: ["assigned", "Compare outcomes against task_id, epoch, scope, completion conditions, and the debugging integrity gate.", "Final audit result with debug root-cause status when applicable."],
   };
 
   return `# Role Assignments
+
+## Debugging Integrity Gate
+
+- ${DEBUG_INTEGRITY}
+- For debug or repair tasks, integration material must include expected outcome, actual failure, reproduction path, failure point, root cause, fix, and verification.
 
 ${ROLES.map((role) => {
   const [status, assignment, expectedOutput] = assignments[role];
@@ -550,6 +566,11 @@ You are a coding-agents worker for task \`${context.taskId}\`.
 
 Read \`${STATE_DIR_NAME}/README.md\`, then \`project.md\`, \`task.md\`, \`todo.md\`, \`decisions.md\`, \`assignments.md\`, \`audit.md\`, and \`runner.md\` if present.
 Preserve unrelated edits. Work only inside scope. Update \`${STATE_DIR_NAME}/audit.md\` with verification results before handoff.
+
+Debugging integrity:
+- ${DEBUG_INTEGRITY}
+- If root cause remains unknown, report unresolved or temporary containment and name the next investigation step.
+- Separate root cause, fix, and verification in debug or repair summaries.
 
 Subagent lifecycle:
 - Child workers return concise parent-integration material and stop instead of waiting for more work.
@@ -607,6 +628,7 @@ function renderAssignmentPacket(packet) {
 - target_cwd: ${packet.targetCwd}
 - assignment: ${packet.assignment}
 - expected_output: ${packet.expectedOutput}
+- debugging_integrity: ${DEBUG_INTEGRITY}
 - lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
 }
 
@@ -627,6 +649,7 @@ function renderIntegrationPacket(packet) {
 - blockers: ${packet.blockers}
 - assumptions: ${packet.assumptions}
 - next: ${packet.next}
+- debugging_integrity: ${DEBUG_INTEGRITY}
 - lifecycle: Parent integrates this packet, records any blocker or follow-up, then closes or retires the subagent unless an explicitly scoped continuation is required.`;
 }
 
@@ -645,6 +668,7 @@ function renderOrchestrationSkeleton(packet) {
 - expected_output: ${packet.expectedOutput}
 - spawned: false
 - next: hand this assignment packet to an available subagent mechanism outside this MVP CLI
+- debugging_integrity: ${DEBUG_INTEGRITY}
 - lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
 }
 
@@ -668,6 +692,7 @@ function renderRunnerResult(result) {
 - expected_output: ${result.expectedOutput}
 - summary: ${result.summary || "none"}
 - failure: ${result.failure}
+- debugging_integrity: ${DEBUG_INTEGRITY}
 - lifecycle: ${renderRunnerLifecycle(result)}`;
 }
 
@@ -680,6 +705,7 @@ function appendRunnerEntry(commandContext, heading, entry) {
 
 This file records CLI-issued assignments, parent-integration packets, process-orchestration skeletons, and process runner results.
 Subagents are closed or retired after integration, timeout/failure/blocker handling, stale premise/scope change, or final report when no further use is expected.
+${DEBUG_INTEGRITY}
 `;
   const current = existsSync(runnerPath) ? readFileSync(runnerPath, "utf8") : initial;
   writeFileSync(runnerPath, appendUnderHeading(current, heading, entry), "utf8");
@@ -766,6 +792,12 @@ function validateRoleAssignments(text) {
     fatal = true;
   }
 
+  if (text.includes(DEBUG_INTEGRITY)) results.push(["ok", "debugging integrity gate present"]);
+  else {
+    results.push(["warn", "debugging integrity gate missing from assignments"]);
+    fatal = true;
+  }
+
   return { results, fatal };
 }
 
@@ -784,21 +816,21 @@ function validateRunnerPackets(text) {
       }
     }
     if (type === "assignment" || type === "process-orchestration-skeleton") {
-      for (const field of ["assignment", "expected_output", "lifecycle"]) {
+      for (const field of ["assignment", "expected_output", "debugging_integrity", "lifecycle"]) {
         if (!getFieldValue(section, field)) {
           invalidPackets.push(`${section.split("\n")[0].replace(/^### /, "")}.${field}`);
         }
       }
     }
     if (type === "parent-integration") {
-      for (const field of ["status", "lifecycle"]) {
+      for (const field of ["status", "debugging_integrity", "lifecycle"]) {
         if (!getFieldValue(section, field)) {
           invalidPackets.push(`${section.split("\n")[0].replace(/^### /, "")}.${field}`);
         }
       }
     }
     if (type === "process-runner-result") {
-      for (const field of ["status", "runner", "spawned", "exit_code", "summary", "failure", "lifecycle"]) {
+      for (const field of ["status", "runner", "spawned", "exit_code", "summary", "failure", "debugging_integrity", "lifecycle"]) {
         if (!getFieldValue(section, field)) {
           invalidPackets.push(`${section.split("\n")[0].replace(/^### /, "")}.${field}`);
         }
@@ -1034,7 +1066,7 @@ Commands:
   run/orchestrate
            Record an assignment and orchestration skeleton by default; with --runner codex-cli, spawn codex exec and record normalized results.
   verify-assignments
-           Block missing or empty task_id, epoch, scope, or lifecycle fields in assignments and runner packets.
+           Block missing or empty task_id, epoch, scope, lifecycle, or debugging_integrity fields in assignments and runner packets.
   handoff  Print target .coding-agents/handoff.md.
   doctor   Check required workflow files, role assignments, isolation keys, and Git state.
 
@@ -1046,7 +1078,8 @@ State:
   With --target-cwd, --cwd records the invocation cwd (or process cwd when omitted) while state and runner execution use --target-cwd.
   Existing docs/codex directories are migration input or hints only; they are never operational state fallback or write targets.
   State writes add .coding-agents/ to .git/info/exclude; .gitignore is not edited.
-  Generated assignments, handoff prompts, and runner packets carry the rule that subagents return concise integration material and are closed or retired promptly when no longer needed.
+  Generated assignments, handoff prompts, and runner packets carry lifecycle closure and debugging integrity rules.
+  Debug or repair work must identify root cause and verify the intended outcome; log-only, fallback-only, skip-only, failure-output-only, or return-to-main-loop-only changes are not completion.
 `);
 }
 

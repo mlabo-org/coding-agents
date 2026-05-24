@@ -6,7 +6,7 @@ behavior. It is not workflow state and must not be treated as a generated
 
 ## Confirmed Boundary
 
-Items 1-4 are Coding Agents self changes. Item 5 is external legacy cleanup.
+Items 1-5 are Coding Agents self changes. Item 6 is external legacy cleanup.
 
 1. State directory
    - Coding Agents runtime/workflow state belongs under `<git-root>/.coding-agents/`.
@@ -46,7 +46,17 @@ Items 1-4 are Coding Agents self changes. Item 5 is external legacy cleanup.
    - Generated assignments, runner prompts, runner packets, and handoff material
      must carry this lifecycle rule so future job state preserves it.
 
-5. Legacy migration and cleanup
+5. Debugging integrity
+   - Debug or repair work is complete only when the root cause is identified,
+     fixed, and verified against the intended outcome.
+   - Log-only, error-message-only, exception-catch-only, skip-only,
+     fallback-only, failure-output-only, and return-to-main-loop-only changes are
+     temporary containment at most and must not be accepted as debug completion.
+   - Generated assignments, runner prompts, runner packets, audit material, and
+     handoff material must carry this debugging integrity rule so delegated work
+     preserves it.
+
+6. Legacy migration and cleanup
    - Existing legacy locations are cleaned through an explicit migration workflow,
      not by silent deletion or broad automatic rewriting.
    - The migration workflow must perform a preflight backup before destructive or
@@ -73,8 +83,8 @@ Future implementation work should preserve this split:
   target repository's generated `.coding-agents/` state. Running the source CLI
   from the plugin repository does not make the plugin repository the state owner
   when `--target-cwd` or an explicit target points elsewhere.
-- Generated job state must preserve subagent lifecycle closure and concise
-  integration-output rules.
+- Generated job state must preserve subagent lifecycle closure, concise
+  integration-output rules, and debug root-cause completion requirements.
 - Legacy cleanup work may inspect external target repositories but must remain
   dry-run until the user explicitly requests apply.
 - Migration apply and plugin cache refresh are separate user-confirmed steps.
