@@ -43,6 +43,7 @@ Codex は、本書の発火前提、作業手順、ツール境界、ファイ�
 - Debug assignments and handoff material must require the worker to identify the expected outcome, actual failure, reproduction path, failure point, root cause, fix, and verification that the intended outcome now works.
 - The parent must reject or reassign any subagent result that claims completion without a root cause and outcome verification for a debug or repair task.
 - The final Coding Agents report for debug or repair work must separate root cause, fix, and verification. If root cause remains unknown, report the work as unresolved or temporary containment and name the next investigation step.
+- Existing `.coding-agents` state created before this gate is stale when `assignments.md`, `handoff.md`, `runner.md`, or runner packets lack the debugging integrity gate. Do not weaken validation to accept it; normalize the state explicitly with `normalize-debugging-integrity --execute` or regenerate it with intake before treating verification as current.
 
 ## Subagent Operating Model
 
@@ -89,9 +90,13 @@ Use the source CLI when the user wants to test source-tree behavior before plugi
    `node /Users/suzukimakoto/plugins/coding-agents/bin/coding-agents.mjs doctor --target-cwd <jobsite>`.
 7. Print handoff when needed:
    `node /Users/suzukimakoto/plugins/coding-agents/bin/coding-agents.mjs handoff --target-cwd <jobsite> --task-id <id>`.
-8. For `assign`, `collect`, `run`, or `orchestrate`, record operational packets in the jobsite repository's `.coding-agents/runner.md`.
-9. Ensure generated assignments, runner prompts, runner packets, and handoff material carry both the lifecycle rule and debugging integrity gate: subagents return concise integration material, stop waiting for more work, are closed or retired promptly when no longer needed, do not require parent-side `wait_agent` unless the user explicitly asked for synchronous waiting, and do not claim debug completion through log-only, fallback-only, skip-only, or return-to-main-loop-only changes.
-10. Treat marketplace registration, `~/.codex/plugins/cache/` refresh, and Codex restart/new-thread activation as separate work unless the user explicitly includes them.
+8. If pre-existing `.coding-agents` state lacks the debugging integrity gate, run dry-run first:
+   `node /Users/suzukimakoto/plugins/coding-agents/bin/coding-agents.mjs normalize-debugging-integrity --target-cwd <jobsite>`.
+   Apply only after confirming the target state directory:
+   `node /Users/suzukimakoto/plugins/coding-agents/bin/coding-agents.mjs normalize-debugging-integrity --target-cwd <jobsite> --execute`.
+9. For `assign`, `collect`, `run`, or `orchestrate`, record operational packets in the jobsite repository's `.coding-agents/runner.md`.
+10. Ensure generated assignments, runner prompts, runner packets, and handoff material carry both the lifecycle rule and debugging integrity gate: subagents return concise integration material, stop waiting for more work, are closed or retired promptly when no longer needed, do not require parent-side `wait_agent` unless the user explicitly asked for synchronous waiting, and do not claim debug completion through log-only, fallback-only, skip-only, or return-to-main-loop-only changes.
+11. Treat marketplace registration, `~/.codex/plugins/cache/` refresh, and Codex restart/new-thread activation as separate work unless the user explicitly includes them.
 
 If source CLI output still names legacy `docs/codex`, treat that as source implementation drift to report or fix under the active task scope. Do not let legacy output redefine the current skill contract.
 
@@ -106,11 +111,12 @@ If source CLI output still names legacy `docs/codex`, treat that as source imple
 7. Execute or coordinate work according to `.coding-agents/todo.md`.
 8. Record user-confirmed decisions in `.coding-agents/decisions.md` and update `.coding-agents/task.md` when scope changes.
 9. Create or update `.coding-agents/runner.md` only for `assign`, `collect`, `run`, `orchestrate`, parent-integration packet, or process-result activity.
-10. After every completed result integration, timeout/failure/blocker handling, stale premise, or scope change, close or retire subagents that are no longer needed before issuing new assignments.
-11. Verify implementation against the accepted decisions and completion conditions. For debug or repair work, verification must include root cause, fix, and evidence that the intended outcome now succeeds; otherwise mark the task unresolved or temporarily contained.
-12. Before the final report, confirm no subagent remains open unless the user explicitly asked to keep it for a continued assignment.
-13. Append audit results to `.coding-agents/audit.md`, including checks not run and why.
-14. Report final status with changed files, verification, open risks, and next TODOs.
+10. Normalize stale pre-gate `.coding-agents` state with `normalize-debugging-integrity` before relying on `verify-assignments` or `doctor` results.
+11. After every completed result integration, timeout/failure/blocker handling, stale premise, or scope change, close or retire subagents that are no longer needed before issuing new assignments.
+12. Verify implementation against the accepted decisions and completion conditions. For debug or repair work, verification must include root cause, fix, and evidence that the intended outcome now succeeds; otherwise mark the task unresolved or temporarily contained.
+13. Before the final report, confirm no subagent remains open unless the user explicitly asked to keep it for a continued assignment.
+14. Append audit results to `.coding-agents/audit.md`, including checks not run and why.
+15. Report final status with changed files, verification, open risks, and next TODOs.
 
 ## File Boundaries
 

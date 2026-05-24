@@ -60,6 +60,7 @@ function main() {
     else if (args.command === "handoff") handoff(args);
     else if (args.command === "doctor") doctor(args);
     else if (args.command === "verify-assignments") verifyAssignments(args);
+    else if (args.command === "normalize-debugging-integrity") normalizeDebuggingIntegrity(args);
     else if (args.command === "assign") assign(args);
     else if (args.command === "collect") collect(args);
     else if (args.command === "run" || args.command === "orchestrate") run(args);
@@ -83,6 +84,10 @@ function parseArgs(argv) {
     }
     if (token.startsWith("--")) {
       const key = token.slice(2);
+      if (["execute", "dry-run"].includes(key)) {
+        parsed[toCamel(key)] = true;
+        continue;
+      }
       const value = argv[i + 1];
       if (!value || value.startsWith("--")) {
         throw new CliError(`missing value for --${key}`);
@@ -323,6 +328,58 @@ function verifyAssignments(args) {
     console.log(`${level} ${message}`);
   }
   process.exit(fatal ? 1 : 0);
+}
+
+function normalizeDebuggingIntegrity(args) {
+  const commandContext = resolveCommandContext(args);
+  const state = resolveWorkflowState(commandContext.targetCwd);
+  const stateDir = state.stateDir;
+  if (!existsSync(stateDir)) {
+    throw new CliError(`missing workflow state directory: ${stateDir}`, 1);
+  }
+
+  const normalizers = {
+    "README.md": normalizeReadmeDebugIntegrity,
+    "task.md": normalizeTaskDebugIntegrity,
+    "audit.md": normalizeAuditDebugIntegrity,
+    "assignments.md": normalizeAssignmentsDebugIntegrity,
+    "handoff.md": normalizeHandoffDebugIntegrity,
+    [RUNNER_FILE]: normalizeRunnerDebugIntegrity,
+  };
+  const updates = [];
+
+  for (const [file, normalize] of Object.entries(normalizers)) {
+    const filePath = path.join(stateDir, file);
+    if (!existsSync(filePath)) continue;
+    const current = readFileSync(filePath, "utf8");
+    const next = normalize(current);
+    if (next !== current) updates.push({ file, filePath, next });
+  }
+
+  const mode = args.execute ? "EXECUTE" : "DRY-RUN";
+  console.log(`Mode: ${mode}`);
+  console.log(`State dir: ${stateDir}`);
+  if (updates.length === 0) {
+    console.log("No debugging integrity normalization needed.");
+    printLegacyHints(state);
+    return;
+  }
+
+  for (const update of updates) {
+    console.log(`${args.execute ? "Updated" : "Would update"}: ${update.file}`);
+  }
+  if (!args.execute) {
+    console.log("No changes made. Re-run with --execute to normalize existing workflow state.");
+    printLegacyHints(state);
+    return;
+  }
+
+  prepareStateWrite(state);
+  for (const update of updates) {
+    writeFileSync(update.filePath, ensureTrailingNewline(update.next), "utf8");
+  }
+  finalizeStateWrite(state);
+  printLegacyHints(state);
 }
 
 function doctor(args) {
@@ -577,6 +634,113 @@ Subagent lifecycle:
 - The parent closes or retires subagents after completed result integration, timeout/failure/blocker handling, stale premise/scope change, and before final report when no further use is expected.
 - If more work is needed after a stale premise, scope change, or failed verification, issue a fresh scoped assignment with current \`task_id\`, \`epoch\`, and \`scope\`.
 `;
+}
+
+function normalizeReadmeDebugIntegrity(text) {
+  const block = `- ${DEBUG_INTEGRITY}`;
+  const lifecycleLine =
+    "- Subagents are active only for scoped work and must be closed or retired promptly when their result is integrated, blocked, failed, timed out, stale, or no longer needed.";
+  let next = text.replace(
+    new RegExp(
+      `^- Subagents are active only for scoped work and must be closed or retired promptly\\n- ${escapeRegExp(DEBUG_INTEGRITY)} when their result is integrated, blocked, failed, timed out, stale, or no longer needed\\.$`,
+      "m",
+    ),
+    `${lifecycleLine}\n${block}`,
+  );
+  if (next.includes(DEBUG_INTEGRITY)) return next;
+  return insertAfterLineMatching(
+    next,
+    new RegExp(`^${escapeRegExp(lifecycleLine)}$`, "m"),
+    block,
+    `## Debugging Integrity\n\n${block}`,
+  );
+}
+
+function normalizeTaskDebugIntegrity(text) {
+  const block = "- Debug or repair work is not complete until root cause is identified, fixed, and verified against the intended outcome.";
+  const lifecycleLine =
+    "- Each generated assignment carries lifecycle guidance requiring concise integration material and prompt close/retire handling.";
+  let next = text.replace(
+    new RegExp(
+      `^- Each generated assignment carries lifecycle guidance\\n${escapeRegExp(block)} requiring concise integration material and prompt close/retire handling\\.$`,
+      "m",
+    ),
+    `${lifecycleLine}\n${block}`,
+  );
+  if (next.includes("Debug or repair work is not complete until root cause is identified")) return next;
+  return insertAfterLineMatching(next, new RegExp(`^${escapeRegExp(lifecycleLine)}$`, "m"), block, block);
+}
+
+function normalizeAuditDebugIntegrity(text) {
+  if (text.includes("For debug or repair work, record root cause")) return text;
+  const block = "- For debug or repair work, record root cause, fix, and verification that the intended outcome now succeeds.";
+  return insertAfterLineMatching(text, /^- Record skipped checks with reasons\./m, block, block);
+}
+
+function normalizeAssignmentsDebugIntegrity(text) {
+  if (text.includes(DEBUG_INTEGRITY)) return text;
+  const block = `## Debugging Integrity Gate
+
+- ${DEBUG_INTEGRITY}
+- For debug or repair tasks, integration material must include expected outcome, actual failure, reproduction path, failure point, root cause, fix, and verification.`;
+  return insertAfterHeading(text, "# Role Assignments", block);
+}
+
+function normalizeHandoffDebugIntegrity(text) {
+  if (text.includes("Debugging integrity:")) return text;
+  const block = `Debugging integrity:
+- ${DEBUG_INTEGRITY}
+- If root cause remains unknown, report unresolved or temporary containment and name the next investigation step.
+- Separate root cause, fix, and verification in debug or repair summaries.`;
+  if (/^Subagent lifecycle:$/m.test(text)) {
+    return text.replace(/^Subagent lifecycle:$/m, `${block}\n\nSubagent lifecycle:`);
+  }
+  return `${text.trimEnd()}\n\n${block}\n`;
+}
+
+function normalizeRunnerDebugIntegrity(text) {
+  let next = text;
+  if (!next.includes(DEBUG_INTEGRITY)) {
+    next = insertAfterLineMatching(
+      next,
+      /^Subagents are closed or retired after integration.*$/m,
+      DEBUG_INTEGRITY,
+      DEBUG_INTEGRITY,
+    );
+  }
+
+  const firstPacket = next.search(/^### /m);
+  if (firstPacket === -1) return next;
+  const preamble = next.slice(0, firstPacket);
+  const packets = next.slice(firstPacket).split(/^### /m).filter(Boolean).map((packet) => `### ${packet}`);
+  return preamble + packets.map(normalizeRunnerPacketDebugIntegrity).join("");
+}
+
+function normalizeRunnerPacketDebugIntegrity(section) {
+  const type = getFieldValue(section, "type");
+  if (!["assignment", "parent-integration", "process-orchestration-skeleton", "process-runner-result"].includes(type)) {
+    return section;
+  }
+  if (getFieldValue(section, "debugging_integrity")) return section;
+  return insertFieldBeforeLifecycle(section, "debugging_integrity", DEBUG_INTEGRITY);
+}
+
+function insertFieldBeforeLifecycle(section, field, value) {
+  const line = `- ${field}: ${value}`;
+  if (new RegExp(`^- ${escapeRegExp(field)}:`, "m").test(section)) return section;
+  if (/^- lifecycle:/m.test(section)) return section.replace(/^- lifecycle:/m, `${line}\n- lifecycle:`);
+  return `${section.trimEnd()}\n${line}\n`;
+}
+
+function insertAfterHeading(text, heading, block) {
+  const pattern = new RegExp(`^${escapeRegExp(heading)}$`, "m");
+  if (!pattern.test(text)) return `${text.trimEnd()}\n\n${block}\n`;
+  return text.replace(pattern, `${heading}\n\n${block}`);
+}
+
+function insertAfterLineMatching(text, pattern, block, fallback) {
+  if (pattern.test(text)) return text.replace(pattern, (line) => `${line}\n${block}`);
+  return `${text.trimEnd()}\n\n${fallback}\n`;
 }
 
 function requireAssignmentPacket(args, commandContext) {
@@ -1055,6 +1219,7 @@ Usage:
   node bin/coding-agents.mjs collect [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> --status <status> [--findings <text>] [--changed-files <text>] [--verification <text>] [--blockers <text>] [--assumptions <text>] [--next <text>]
   node bin/coding-agents.mjs run|orchestrate [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> --assignment <text> --expected-output <text> [--runner codex-cli] [--timeout-ms <ms>]
   node bin/coding-agents.mjs verify-assignments [--cwd <path>] [--target-cwd <path>]
+  node bin/coding-agents.mjs normalize-debugging-integrity [--cwd <path>] [--target-cwd <path>] [--execute]
   node bin/coding-agents.mjs handoff [--cwd <path>] [--target-cwd <path>] --task-id <id>
   node bin/coding-agents.mjs doctor [--cwd <path>] [--target-cwd <path>]
   node bin/coding-agents.mjs --help
@@ -1067,6 +1232,8 @@ Commands:
            Record an assignment and orchestration skeleton by default; with --runner codex-cli, spawn codex exec and record normalized results.
   verify-assignments
            Block missing or empty task_id, epoch, scope, lifecycle, or debugging_integrity fields in assignments and runner packets.
+  normalize-debugging-integrity
+           Dry-run by default. With --execute, add the debugging integrity gate to existing .coding-agents files and runner packets.
   handoff  Print target .coding-agents/handoff.md.
   doctor   Check required workflow files, role assignments, isolation keys, and Git state.
 
@@ -1124,6 +1291,10 @@ function summarizeRunnerOutput(value) {
 
 function formatExitCode(value) {
   return typeof value === "number" ? String(value) : "none";
+}
+
+function ensureTrailingNewline(value) {
+  return value.endsWith("\n") ? value : `${value}\n`;
 }
 
 function parsePositiveInt(value, flag) {

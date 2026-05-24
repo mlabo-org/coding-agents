@@ -25,6 +25,7 @@
       "Run Coding Agents intake for this target repo.",
       "Plan this coding task with scoped subagents.",
       "Audit the completed coding-agent work.",
+      "Normalize stale debugging integrity state for this target repo.",
       "Debug this task with root cause, fix, and intended-outcome verification."
     ],
     "brandColor": "#2563EB"

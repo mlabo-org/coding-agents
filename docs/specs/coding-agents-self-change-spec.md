@@ -55,6 +55,10 @@ Items 1-5 are Coding Agents self changes. Item 6 is external legacy cleanup.
    - Generated assignments, runner prompts, runner packets, audit material, and
      handoff material must carry this debugging integrity rule so delegated work
      preserves it.
+   - Existing `.coding-agents` state that predates this rule is stale when
+     assignments, handoff material, runner docs, or runner packets lack the
+     debugging integrity gate. Validation must not be weakened to accept stale
+     state; use an explicit normalization command or regenerate intake state.
 
 6. Legacy migration and cleanup
    - Existing legacy locations are cleaned through an explicit migration workflow,
@@ -85,6 +89,8 @@ Future implementation work should preserve this split:
   when `--target-cwd` or an explicit target points elsewhere.
 - Generated job state must preserve subagent lifecycle closure, concise
   integration-output rules, and debug root-cause completion requirements.
+- Stale generated state must be normalized explicitly before verification is
+  treated as current.
 - Legacy cleanup work may inspect external target repositories but must remain
   dry-run until the user explicitly requests apply.
 - Migration apply and plugin cache refresh are separate user-confirmed steps.
