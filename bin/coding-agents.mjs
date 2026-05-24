@@ -17,10 +17,6 @@ const SUBAGENT_LIFECYCLE =
   "Parent closes or retires this subagent promptly after result integration, timeout/failure/blocker handling, stale premise/scope change, or final report when no further use is expected.";
 const CHILD_RETURN_LIFECYCLE =
   "Return concise parent-integration material and stop; do not stay open waiting for more work.";
-const NO_WAIT_UX =
-  "No-wait is not passive idle: wait_agent/agent_wait are not required for completion detection, and the parent must not wait for a user nudge after a completion notification or actual result arrives; unless the user explicitly requests synchronous waiting, the parent holds only result-dependent work, states the blocker and resume condition, keeps conversation, additional instruction intake, and independent work open, and must not fabricate or integrate unavailable results.";
-const RESULT_ARRIVAL_UX =
-  "When completion notifications or actual subagent results arrive, the parent promptly collects, evaluates, integrates or rejects the result, closes or retires the subagent when no further scoped use remains, and continues any now-unblocked next work; if that branch remains blocked, the parent states the blocker and resume condition and stops only that branch.";
 const DEBUG_INTEGRITY =
   "For debug or repair work, identify root cause and make the intended outcome succeed; log-only, fallback-only, skip-only, failure-output-only, or return-to-main-loop-only changes are not completion.";
 
@@ -312,7 +308,6 @@ Boundaries:
 Lifecycle:
 - ${CHILD_RETURN_LIFECYCLE}
 - ${SUBAGENT_LIFECYCLE}
-- No-wait is not passive idle. If a completion notification or actual result arrives, the parent must resume collection/evaluation/integration-or-rejection/close-retire flow promptly and continue now-unblocked work. Do not fabricate unavailable results.
 
 Return exactly these sections, kept concise:
 - findings:
@@ -477,8 +472,6 @@ Operational log:
 
 - \`runner.md\`: optional; created by \`assign\`, \`collect\`, or \`run\` only.
 - Subagents are active only for scoped work and must be closed or retired promptly when their result is integrated, blocked, failed, timed out, stale, or no longer needed.
-- ${NO_WAIT_UX}
-- ${RESULT_ARRIVAL_UX}
 - ${DEBUG_INTEGRITY}
 `;
 }
@@ -511,8 +504,6 @@ function renderTask(context) {
 - Eight planning files exist in \`${STATE_DIR_NAME}\`.
 - 14 role assignments include \`role\`, \`status\`, \`task_id\`, \`epoch\`, \`scope\`, \`assignment\`, \`expected_output\`, and \`lifecycle\`.
 - Each generated assignment carries lifecycle guidance requiring concise integration material and prompt close/retire handling.
-- Parent-side result waiting is not the default completion detector; no-wait is not passive idle or waiting for a user nudge, so notifications or actual results trigger prompt collection, evaluation, integration or rejection, close/retire handling, and continuation of now-unblocked work.
-- Only the result-dependent branch is held when output is unavailable, while conversation, additional instruction intake, and independent work remain open.
 - Debug or repair work is not complete until root cause is identified, fixed, and verified against the intended outcome.
 - Handoff prompt is available for the next worker.
 `;
@@ -547,15 +538,7 @@ function renderDecisions(context) {
 - accepted: subagents return concise parent-integration material and do not remain open waiting for more work.
 - impact: parent closes or retires no-longer-needed subagents after integration, timeout/failure/blocker handling, stale premise/scope change, and before final report.
 
-## D-${context.taskId}-004 No-Wait Parent UX
-
-- accepted: \`wait_agent\` and \`agent_wait\` are not default completion detectors; synchronous waiting is allowed only when the user explicitly requests it.
-- accepted: no-wait does not mean passive idle, waiting for a user nudge, or leaving completed subagent work uncollected.
-- impact: when subagent output is unavailable, the parent holds only the result-dependent branch, states the blocker and resume condition, keeps conversation, additional instruction intake, and independent work open, and must not fabricate or integrate unavailable results.
-- impact: when completion notifications or actual results arrive, the parent promptly collects, evaluates, integrates or rejects, closes or retires the subagent when no further scoped use remains, and continues any now-unblocked next work.
-- impact: if a branch remains blocked after notification or result evaluation, the parent states the blocker and resume condition and stops only that branch.
-
-## D-${context.taskId}-005 Debugging Integrity
+## D-${context.taskId}-004 Debugging Integrity
 
 - accepted: debug or repair work must identify root cause and restore the intended outcome.
 - impact: log-only, fallback-only, skip-only, failure-output-only, and return-to-main-loop-only changes are temporary containment at most and must not be accepted as completion.
@@ -610,11 +593,6 @@ function renderAssignments(context) {
 - ${DEBUG_INTEGRITY}
 - For debug or repair tasks, integration material must include expected outcome, actual failure, reproduction path, failure point, root cause, fix, and verification.
 
-## No-Wait Parent UX
-
-- ${NO_WAIT_UX}
-- ${RESULT_ARRIVAL_UX}
-
 ${ROLES.map((role) => {
   const [status, assignment, expectedOutput] = assignments[role];
   return `## ${role}
@@ -626,7 +604,7 @@ ${ROLES.map((role) => {
 - scope: ${context.scope}
 - assignment: ${assignment}
 - expected_output: ${expectedOutput}
-- lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE} ${NO_WAIT_UX} ${RESULT_ARRIVAL_UX}`;
+- lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
 }).join("\n\n")}
 `;
 }
@@ -653,9 +631,6 @@ Debugging integrity:
 
 Subagent lifecycle:
 - Child workers return concise parent-integration material and stop instead of waiting for more work.
-- ${NO_WAIT_UX}
-- ${RESULT_ARRIVAL_UX}
-- Do not treat no-wait as passive idle or waiting for a user nudge after a subagent completion notification.
 - The parent closes or retires subagents after completed result integration, timeout/failure/blocker handling, stale premise/scope change, and before final report when no further use is expected.
 - If more work is needed after a stale premise, scope change, or failed verification, issue a fresh scoped assignment with current \`task_id\`, \`epoch\`, and \`scope\`.
 `;
@@ -818,7 +793,6 @@ function renderAssignmentPacket(packet) {
 - assignment: ${packet.assignment}
 - expected_output: ${packet.expectedOutput}
 - debugging_integrity: ${DEBUG_INTEGRITY}
-- no_wait_ux: ${NO_WAIT_UX} ${RESULT_ARRIVAL_UX}
 - lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
 }
 
@@ -840,7 +814,6 @@ function renderIntegrationPacket(packet) {
 - assumptions: ${packet.assumptions}
 - next: ${packet.next}
 - debugging_integrity: ${DEBUG_INTEGRITY}
-- no_wait_ux: ${NO_WAIT_UX} ${RESULT_ARRIVAL_UX}
 - lifecycle: Parent integrates this packet, records any blocker or follow-up, then closes or retires the subagent unless an explicitly scoped continuation is required.`;
 }
 
@@ -860,7 +833,6 @@ function renderOrchestrationSkeleton(packet) {
 - spawned: false
 - next: hand this assignment packet to an available subagent mechanism outside this MVP CLI
 - debugging_integrity: ${DEBUG_INTEGRITY}
-- no_wait_ux: ${NO_WAIT_UX} ${RESULT_ARRIVAL_UX}
 - lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
 }
 
@@ -885,7 +857,6 @@ function renderRunnerResult(result) {
 - summary: ${result.summary || "none"}
 - failure: ${result.failure}
 - debugging_integrity: ${DEBUG_INTEGRITY}
-- no_wait_ux: ${NO_WAIT_UX} ${RESULT_ARRIVAL_UX}
 - lifecycle: ${renderRunnerLifecycle(result)}`;
 }
 
@@ -898,8 +869,6 @@ function appendRunnerEntry(commandContext, heading, entry) {
 
 This file records CLI-issued assignments, parent-integration packets, process-orchestration skeletons, and process runner results.
 Subagents are closed or retired after integration, timeout/failure/blocker handling, stale premise/scope change, or final report when no further use is expected.
-${NO_WAIT_UX}
-${RESULT_ARRIVAL_UX}
 ${DEBUG_INTEGRITY}
 `;
   const current = existsSync(runnerPath) ? readFileSync(runnerPath, "utf8") : initial;
@@ -1276,8 +1245,7 @@ State:
   With --target-cwd, --cwd records the invocation cwd (or process cwd when omitted) while state and runner execution use --target-cwd.
   Existing docs/codex directories are migration input or hints only; they are never operational state fallback or write targets.
   State writes add .coding-agents/ to .git/info/exclude; .gitignore is not edited.
-  Generated assignments, handoff prompts, and runner packets carry lifecycle closure, no-wait parent UX, and debugging integrity rules.
-  wait_agent/agent_wait are not default completion detectors; no-wait is not passive idle or waiting for a user nudge, so notifications or actual results trigger prompt collection/evaluation/integration-or-rejection/close-retire handling and continuation of now-unblocked work. Unless the user explicitly asks for synchronous waiting, hold only result-dependent work, state the blocker and resume condition, keep conversation and independent work open, and never fabricate unavailable results.
+  Generated assignments, handoff prompts, and runner packets carry lifecycle closure and debugging integrity rules.
   Debug or repair work must identify root cause and verify the intended outcome; log-only, fallback-only, skip-only, failure-output-only, or return-to-main-loop-only changes are not completion.
 `);
 }
