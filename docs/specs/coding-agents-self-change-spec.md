@@ -46,16 +46,22 @@ Items 1-5 are Coding Agents self changes. Item 6 is external legacy cleanup.
    - `wait_agent` and `agent_wait` are not required for completion detection and
      must not be treated as the default way to know whether a subagent finished.
      The narrow exception is an explicit user request for synchronous waiting.
+   - No-wait must not be interpreted as passive idling, waiting for a user nudge,
+     or leaving completed subagent work uncollected.
    - When subagent output is not yet available, the parent holds only the
      result-dependent branch, states the blocker and resume condition, and keeps
      conversation, additional instruction intake, and independent work open.
    - The parent must not fabricate, summarize, integrate, or make decisions from
      unavailable subagent results.
    - When a completion notification or actual subagent result arrives, the parent
-     collects, evaluates, integrates or rejects the result, and closes or retires
-     the subagent when no further scoped use remains.
-   - Generated assignments, runner prompts, runner packets, and handoff material
-     must carry this lifecycle rule so future job state preserves it.
+     promptly collects, evaluates, integrates or rejects the result, closes or
+     retires the subagent when no further scoped use remains, and continues any
+     now-unblocked next work.
+   - If a branch remains blocked after notification or result evaluation, the
+     parent states the blocker and resume condition and stops only that branch.
+   - Generated README, task, decisions, assignments, handoff, runner text,
+     runner prompts, and runner packet fields must carry this lifecycle and
+     autonomous-resume rule so future job state preserves it.
 
 5. Debugging integrity
    - Debug or repair work is complete only when the root cause is identified,
@@ -105,6 +111,12 @@ Future implementation work should preserve this split:
   is named as a blocker, but the parent keeps conversation, additional
   instruction intake, and independent work open; unavailable results are never
   fabricated or integrated.
+- No-wait parent UX is not passive idle. Completion notifications, returned
+  subagent messages, runner results, or actual result artifacts trigger
+  autonomous parent resume: collect, evaluate, integrate or reject, close or
+  retire no-longer-needed subagents, and continue now-unblocked work. If the
+  branch remains blocked, state the blocker and resume condition and stop only
+  that branch.
 - Stale generated state must be normalized explicitly before verification is
   treated as current.
 - Legacy cleanup work may inspect external target repositories but must remain

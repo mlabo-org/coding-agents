@@ -18,9 +18,9 @@ const SUBAGENT_LIFECYCLE =
 const CHILD_RETURN_LIFECYCLE =
   "Return concise parent-integration material and stop; do not stay open waiting for more work.";
 const NO_WAIT_UX =
-  "wait_agent/agent_wait are not required for completion detection; unless the user explicitly requests synchronous waiting, the parent holds only result-dependent work, states the blocker and resume condition, keeps conversation, additional instruction intake, and independent work open, and must not fabricate or integrate unavailable results.";
+  "No-wait is not passive idle: wait_agent/agent_wait are not required for completion detection, and the parent must not wait for a user nudge after a completion notification or actual result arrives; unless the user explicitly requests synchronous waiting, the parent holds only result-dependent work, states the blocker and resume condition, keeps conversation, additional instruction intake, and independent work open, and must not fabricate or integrate unavailable results.";
 const RESULT_ARRIVAL_UX =
-  "When completion notifications or actual subagent results arrive, the parent collects, evaluates, integrates, and closes or retires the subagent promptly.";
+  "When completion notifications or actual subagent results arrive, the parent promptly collects, evaluates, integrates or rejects the result, closes or retires the subagent when no further scoped use remains, and continues any now-unblocked next work; if that branch remains blocked, the parent states the blocker and resume condition and stops only that branch.";
 const DEBUG_INTEGRITY =
   "For debug or repair work, identify root cause and make the intended outcome succeed; log-only, fallback-only, skip-only, failure-output-only, or return-to-main-loop-only changes are not completion.";
 
@@ -312,6 +312,7 @@ Boundaries:
 Lifecycle:
 - ${CHILD_RETURN_LIFECYCLE}
 - ${SUBAGENT_LIFECYCLE}
+- No-wait is not passive idle. If a completion notification or actual result arrives, the parent must resume collection/evaluation/integration-or-rejection/close-retire flow promptly and continue now-unblocked work. Do not fabricate unavailable results.
 
 Return exactly these sections, kept concise:
 - findings:
@@ -510,7 +511,8 @@ function renderTask(context) {
 - Eight planning files exist in \`${STATE_DIR_NAME}\`.
 - 14 role assignments include \`role\`, \`status\`, \`task_id\`, \`epoch\`, \`scope\`, \`assignment\`, \`expected_output\`, and \`lifecycle\`.
 - Each generated assignment carries lifecycle guidance requiring concise integration material and prompt close/retire handling.
-- Parent-side result waiting is not the default completion detector; only the result-dependent branch is held when output is unavailable, while conversation, additional instruction intake, and independent work remain open.
+- Parent-side result waiting is not the default completion detector; no-wait is not passive idle or waiting for a user nudge, so notifications or actual results trigger prompt collection, evaluation, integration or rejection, close/retire handling, and continuation of now-unblocked work.
+- Only the result-dependent branch is held when output is unavailable, while conversation, additional instruction intake, and independent work remain open.
 - Debug or repair work is not complete until root cause is identified, fixed, and verified against the intended outcome.
 - Handoff prompt is available for the next worker.
 `;
@@ -548,8 +550,10 @@ function renderDecisions(context) {
 ## D-${context.taskId}-004 No-Wait Parent UX
 
 - accepted: \`wait_agent\` and \`agent_wait\` are not default completion detectors; synchronous waiting is allowed only when the user explicitly requests it.
+- accepted: no-wait does not mean passive idle, waiting for a user nudge, or leaving completed subagent work uncollected.
 - impact: when subagent output is unavailable, the parent holds only the result-dependent branch, states the blocker and resume condition, keeps conversation, additional instruction intake, and independent work open, and must not fabricate or integrate unavailable results.
-- impact: when completion notifications or actual results arrive, the parent collects, evaluates, integrates, and closes or retires the subagent promptly.
+- impact: when completion notifications or actual results arrive, the parent promptly collects, evaluates, integrates or rejects, closes or retires the subagent when no further scoped use remains, and continues any now-unblocked next work.
+- impact: if a branch remains blocked after notification or result evaluation, the parent states the blocker and resume condition and stops only that branch.
 
 ## D-${context.taskId}-005 Debugging Integrity
 
@@ -651,6 +655,7 @@ Subagent lifecycle:
 - Child workers return concise parent-integration material and stop instead of waiting for more work.
 - ${NO_WAIT_UX}
 - ${RESULT_ARRIVAL_UX}
+- Do not treat no-wait as passive idle or waiting for a user nudge after a subagent completion notification.
 - The parent closes or retires subagents after completed result integration, timeout/failure/blocker handling, stale premise/scope change, and before final report when no further use is expected.
 - If more work is needed after a stale premise, scope change, or failed verification, issue a fresh scoped assignment with current \`task_id\`, \`epoch\`, and \`scope\`.
 `;
@@ -1272,7 +1277,7 @@ State:
   Existing docs/codex directories are migration input or hints only; they are never operational state fallback or write targets.
   State writes add .coding-agents/ to .git/info/exclude; .gitignore is not edited.
   Generated assignments, handoff prompts, and runner packets carry lifecycle closure, no-wait parent UX, and debugging integrity rules.
-  wait_agent/agent_wait are not default completion detectors; unless the user explicitly asks for synchronous waiting, hold only result-dependent work, state the blocker and resume condition, keep conversation and independent work open, and never fabricate unavailable results.
+  wait_agent/agent_wait are not default completion detectors; no-wait is not passive idle or waiting for a user nudge, so notifications or actual results trigger prompt collection/evaluation/integration-or-rejection/close-retire handling and continuation of now-unblocked work. Unless the user explicitly asks for synchronous waiting, hold only result-dependent work, state the blocker and resume condition, keep conversation and independent work open, and never fabricate unavailable results.
   Debug or repair work must identify root cause and verify the intended outcome; log-only, fallback-only, skip-only, failure-output-only, or return-to-main-loop-only changes are not completion.
 `);
 }

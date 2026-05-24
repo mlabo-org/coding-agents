@@ -1,6 +1,6 @@
 ---
 name: coding-agents
-description: Use when the user wants the Coding Agents workflow or source CLI to intake a jobsite/target cwd, maintain the target git root's <git-root>/.coding-agents/ workflow state even when invoked cross-repo, assign/collect/run scoped specialist work with task_id/epoch/scope/lifecycle isolation, enforce prompt subagent close/retire/no-wait handling where wait_agent/agent_wait are only used for explicit synchronous requests, enforce debugging root-cause integrity for debug or repair work, print a handoff prompt, audit workflow state, or migrate legacy docs/codex material. Trigger for explicit requests to initialize, plan, execute, coordinate, or audit coding work with the coding-agents plugin or source MVP. Do not use for generic coding edits, and do not treat docs/codex as current workflow state.
+description: Use when the user wants the Coding Agents workflow or source CLI to intake a jobsite/target cwd, maintain the target git root's <git-root>/.coding-agents/ workflow state even when invoked cross-repo, assign/collect/run scoped specialist work with task_id/epoch/scope/lifecycle isolation, enforce prompt subagent close/retire/no-wait handling where wait_agent/agent_wait are only used for explicit synchronous requests and completion notifications trigger autonomous parent resume, enforce debugging root-cause integrity for debug or repair work, print a handoff prompt, audit workflow state, or migrate legacy docs/codex material. Trigger for explicit requests to initialize, plan, execute, coordinate, or audit coding work with the coding-agents plugin or source MVP. Do not use for generic coding edits, and do not treat docs/codex as current workflow state.
 ---
 
 # Coding Agents
@@ -35,9 +35,11 @@ Codex は、本書の発火前提、作業手順、ツール境界、ファイ�
 - Subagents own research, implementation material, verification material, and isolated findings. They do not own final policy or final user-facing synthesis.
 - After a subagent result is integrated, after timeout/failure/blocker handling, after a stale premise or scope change, and before the final report when no further use is expected, the parent must close or retire each no-longer-needed subagent promptly.
 - `wait_agent` and `agent_wait` are not required for completion detection and must not be treated as the default way to know whether a subagent finished. The narrow exception is an explicit user request for synchronous waiting.
+- No-wait must not be interpreted as passive idling, waiting for a user nudge, or leaving completed subagent work uncollected.
 - When subagent output is not yet available, the parent must hold only the result-dependent branch, state the blocker and resume condition explicitly, and keep conversation, additional instruction intake, and independent work open.
 - The parent must not fabricate, summarize, integrate, or make final decisions from unavailable subagent results. Treat missing output as missing output.
-- When a completion notification or actual subagent result arrives, the parent must collect, evaluate, integrate or reject the result, and close or retire the subagent when no further scoped use remains.
+- When a completion notification or actual subagent result arrives, the parent must promptly collect, evaluate, integrate or reject the result, close or retire the subagent when no further scoped use remains, and continue any now-unblocked next work.
+- If a branch remains blocked after notification or result evaluation, the parent must state the blocker and resume condition and stop only that branch.
 
 ## Debugging Integrity Gate
 
@@ -55,7 +57,7 @@ Codex は、本書の発火前提、作業手順、ツール境界、ファイ�
 - Every subagent assignment must include `task_id`, `epoch`, `scope`, and `lifecycle`.
 - Treat `task_id` as the unit of user-visible work, `epoch` as the restart boundary for stale context, and `scope` as the allowed file, tool, or investigation boundary.
 - This skill does not authorize the parent to call `wait_agent` or `agent_wait` after spawning or assigning subagents. Unless the user explicitly asks for synchronous waiting, the parent reports the assignment state, the result-dependent branch being held, the blocker, and the resume condition, then continues conversation, additional instruction intake, and independent work that does not depend on the missing result.
-- Completion detection does not require `wait_agent` or `agent_wait`. A completion notification, returned subagent message, runner result, or other actual result artifact is enough to trigger collection, evaluation, integration or rejection, and close/retire handling.
+- Completion detection does not require `wait_agent` or `agent_wait`. A completion notification, returned subagent message, runner result, or other actual result artifact is enough to trigger autonomous parent resume: collection, evaluation, integration or rejection, close/retire handling, and continuation of now-unblocked work without waiting for a user nudge.
 - If no completion notification or result artifact is available, do not infer success, failure, findings, changed files, verification, or blockers on the subagent's behalf.
 - Reuse of a subagent context is an exception. The default action after a meaningful task boundary, stale premise, scope change, or failed verification is restart or retire.
 - A subagent must return concise parent-integration material: findings, changed files or proposed changes, verification notes, blockers, and unresolved assumptions.
@@ -65,15 +67,15 @@ Codex は、本書の発火前提、作業手順、ツール境界、ファイ�
 
 ## Workflow State Files
 
-- `<git-root>/.coding-agents/README.md`: reader order and role map for Codex-facing workflow files.
+- `<git-root>/.coding-agents/README.md`: reader order and role map for Codex-facing workflow files, including no-wait autonomous-resume behavior.
 - `<git-root>/.coding-agents/project.md`: project intake summary for the jobsite itself.
 - `<git-root>/.coding-agents/task.md`: current task SSOT, including purpose, scope, non-goals, and completion conditions.
 - `<git-root>/.coding-agents/todo.md`: executable checklist with stable task IDs.
 - `<git-root>/.coding-agents/decisions.md`: accepted decisions with IDs and implementation impact.
 - `<git-root>/.coding-agents/audit.md`: audit log, completed checks, skipped checks, next audit needs, and debug root-cause verification when the task is a debug or repair task.
 - `<git-root>/.coding-agents/assignments.md`: 14 role assignments. Each role must include `role`, `status`, `task_id`, `epoch`, `scope`, `assignment`, `expected_output`, and `lifecycle`; debug or repair tasks must also carry the debugging integrity gate.
-- `<git-root>/.coding-agents/handoff.md`: prompt material for the next worker to continue the task, including the subagent rule to return concise integration material, keep no-wait UX open while only result-dependent work is held, close or retire no-longer-needed workers promptly, and reject log-only or fallback-only debug completion.
-- `<git-root>/.coding-agents/runner.md`: conditional operational log for `assign`, `collect`, `run`, `orchestrate`, parent-integration packets, and process results. Create or update it only when that activity occurs. Do not require `runner.md` for intake, specification, documentation-only, audit flows that have no runner activity, or completion detection that can be handled by an actual notification/result.
+- `<git-root>/.coding-agents/handoff.md`: prompt material for the next worker to continue the task, including the subagent rule to return concise integration material, keep no-wait UX open while only result-dependent work is held, resume autonomously on completion notifications or actual results, close or retire no-longer-needed workers promptly, and reject log-only or fallback-only debug completion.
+- `<git-root>/.coding-agents/runner.md`: conditional operational log for `assign`, `collect`, `run`, `orchestrate`, parent-integration packets, and process results, including runner packet fields for no-wait autonomous resume. Create or update it only when that activity occurs. Do not require `runner.md` for intake, specification, documentation-only, audit flows that have no runner activity, or completion detection that can be handled by an actual notification/result.
 
 ## Legacy `docs/codex`
 
@@ -101,7 +103,7 @@ Use the source CLI when the user wants to test source-tree behavior before plugi
    Apply only after confirming the target state directory:
    `node /Users/suzukimakoto/plugins/coding-agents/bin/coding-agents.mjs normalize-debugging-integrity --target-cwd <jobsite> --execute`.
 9. For `assign`, `collect`, `run`, or `orchestrate`, record operational packets in the jobsite repository's `.coding-agents/runner.md`.
-10. Ensure generated assignments, runner prompts, runner packets, and handoff material carry the lifecycle rule, no-wait UX rule, and debugging integrity gate: subagents return concise integration material, stop waiting for more work, are closed or retired promptly when no longer needed, do not require parent-side `wait_agent` or `agent_wait` unless the user explicitly asked for synchronous waiting, hold only result-dependent work while output is unavailable, keep conversation and independent work open, collect/evaluate/close when notifications or actual results arrive, never fabricate unavailable results, and do not claim debug completion through log-only, fallback-only, skip-only, or return-to-main-loop-only changes.
+10. Ensure generated README, task, decisions, assignments, runner prompts, runner packets, and handoff material carry the lifecycle rule, no-wait autonomous-resume rule, and debugging integrity gate: subagents return concise integration material, stop waiting for more work, are closed or retired promptly when no longer needed, do not require parent-side `wait_agent` or `agent_wait` unless the user explicitly asked for synchronous waiting, do not treat no-wait as passive idle or waiting for a user nudge, hold only result-dependent work while output is unavailable, keep conversation and independent work open, promptly collect/evaluate/integrate-or-reject/close-retire and continue now-unblocked work when notifications or actual results arrive, state the blocker and resume condition if a branch remains blocked, never fabricate unavailable results, and do not claim debug completion through log-only, fallback-only, skip-only, or return-to-main-loop-only changes.
 11. Treat marketplace registration, `~/.codex/plugins/cache/` refresh, and Codex restart/new-thread activation as separate work unless the user explicitly includes them.
 
 If source CLI output still names legacy `docs/codex`, treat that as source implementation drift to report or fix under the active task scope. Do not let legacy output redefine the current skill contract.
@@ -120,7 +122,7 @@ If source CLI output still names legacy `docs/codex`, treat that as source imple
 10. Normalize stale pre-gate `.coding-agents` state with `normalize-debugging-integrity` before relying on `verify-assignments` or `doctor` results.
 11. If a subagent result is unavailable, hold only the result-dependent branch, state the blocker and resume condition, continue user conversation/additional instruction intake/independent work, and do not fabricate or integrate missing results. If the user explicitly asks for synchronous waiting, treat that as the narrow exception.
 12. After every completed result integration, timeout/failure/blocker handling, stale premise, or scope change, close or retire subagents that are no longer needed before issuing new assignments.
-13. When completion notifications or actual subagent results arrive, collect, evaluate, integrate or reject, record the outcome, and close or retire no-longer-needed subagents promptly.
+13. When completion notifications or actual subagent results arrive, treat that arrival as an autonomous parent resume trigger: collect, evaluate, integrate or reject, record the outcome, close or retire no-longer-needed subagents promptly, and continue any now-unblocked next work. If the evaluated branch remains blocked, state the blocker and resume condition and stop only that branch.
 14. Verify implementation against the accepted decisions and completion conditions. For debug or repair work, verification must include root cause, fix, and evidence that the intended outcome now succeeds; otherwise mark the task unresolved or temporarily contained.
 15. Before the final report, confirm no subagent remains open unless the user explicitly asked to keep it for a continued assignment.
 16. Append audit results to `.coding-agents/audit.md`, including checks not run and why.
