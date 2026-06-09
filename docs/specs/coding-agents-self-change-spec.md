@@ -6,7 +6,7 @@ behavior. It is not workflow state and must not be treated as a generated
 
 ## Confirmed Boundary
 
-Items 1-5 are Coding Agents self changes. Item 6 is external legacy cleanup.
+Items 1-6 are Coding Agents self changes. Item 7 is external legacy cleanup.
 
 1. State directory
    - Coding Agents runtime/workflow state belongs under `<git-root>/.coding-agents/`.
@@ -60,7 +60,18 @@ Items 1-5 are Coding Agents self changes. Item 6 is external legacy cleanup.
      debugging integrity gate. Validation must not be weakened to accept stale
      state; use an explicit normalization command or regenerate intake state.
 
-6. Legacy migration and cleanup
+6. Nested Coding Agents preflight suppression
+   - Parent-managed child workers operate under a Coding Agents assignment that
+     the parent already selected.
+   - Generated assignments, runner prompts, runner packets, and handoff material
+     must tell child workers not to ask `coding-agents を使いますか？ [Y/n]` and
+     not to start nested Coding Agents workflows inside the assigned
+     `task_id`/`epoch`/`scope`.
+   - This suppression does not authorize scope expansion, destructive
+     operations, external sending, commits, cache refresh, plugin activation, or
+     unrelated edits.
+
+7. Legacy migration and cleanup
    - Existing legacy locations are cleaned through an explicit migration workflow,
      not by silent deletion or broad automatic rewriting.
    - The migration workflow must perform a preflight backup before destructive or
@@ -87,8 +98,9 @@ Future implementation work should preserve this split:
   target repository's generated `.coding-agents/` state. Running the source CLI
   from the plugin repository does not make the plugin repository the state owner
   when `--target-cwd` or an explicit target points elsewhere.
-- Generated job state must preserve subagent lifecycle closure, concise
-  integration-output rules, and debug root-cause completion requirements.
+- Generated job state must preserve nested Coding Agents preflight suppression,
+  subagent lifecycle closure, concise integration-output rules, and debug
+  root-cause completion requirements.
 - Stale generated state must be normalized explicitly before verification is
   treated as current.
 - Legacy cleanup work may inspect external target repositories but must remain

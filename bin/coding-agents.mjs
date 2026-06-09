@@ -19,6 +19,8 @@ const CHILD_RETURN_LIFECYCLE =
   "Return concise parent-integration material and stop; do not stay open waiting for more work.";
 const DEBUG_INTEGRITY =
   "For debug or repair work, identify root cause and make the intended outcome succeed; log-only, fallback-only, skip-only, failure-output-only, or return-to-main-loop-only changes are not completion.";
+const NESTED_CODING_AGENTS_PREFLIGHT =
+  "Parent already selected Coding Agents for this parent-managed scoped assignment; do not ask `coding-agents を使いますか？ [Y/n]` and do not start a nested Coding Agents workflow. Proceed directly within the assigned task_id/epoch/scope, but stop before scope expansion, destructive operations, external sending, commits, cache refresh, plugin activation, or unrelated edits.";
 
 const ROLES = [
   "Intake",
@@ -299,6 +301,7 @@ Boundaries:
 - Treat the process cwd as the target/jobsite cwd: ${packet.targetCwd}.
 - Do not treat the invocation cwd as the workflow state root unless it is the same as the target/jobsite cwd.
 - Stay inside the declared scope.
+- ${NESTED_CODING_AGENTS_PREFLIGHT}
 - Preserve unrelated user or worker changes.
 - Do not commit.
 - Do not edit ~/.codex/plugins/cache directly.
@@ -472,6 +475,7 @@ Operational log:
 
 - \`runner.md\`: optional; created by \`assign\`, \`collect\`, or \`run\` only.
 - Subagents are active only for scoped work and must be closed or retired promptly when their result is integrated, blocked, failed, timed out, stale, or no longer needed.
+- ${NESTED_CODING_AGENTS_PREFLIGHT}
 - ${DEBUG_INTEGRITY}
 `;
 }
@@ -504,6 +508,7 @@ function renderTask(context) {
 - Eight planning files exist in \`${STATE_DIR_NAME}\`.
 - 14 role assignments include \`role\`, \`status\`, \`task_id\`, \`epoch\`, \`scope\`, \`assignment\`, \`expected_output\`, and \`lifecycle\`.
 - Each generated assignment carries lifecycle guidance requiring concise integration material and prompt close/retire handling.
+- Each generated child-worker prompt, assignment, handoff, and runner packet carries the nested Coding Agents preflight suppression rule.
 - Debug or repair work is not complete until root cause is identified, fixed, and verified against the intended outcome.
 - Handoff prompt is available for the next worker.
 `;
@@ -542,6 +547,11 @@ function renderDecisions(context) {
 
 - accepted: debug or repair work must identify root cause and restore the intended outcome.
 - impact: log-only, fallback-only, skip-only, failure-output-only, and return-to-main-loop-only changes are temporary containment at most and must not be accepted as completion.
+
+## D-${context.taskId}-005 Nested Coding Agents Preflight Suppression
+
+- accepted: parent-managed child workers must not ask whether to use Coding Agents again or start a nested Coding Agents workflow.
+- impact: generated worker material must direct child workers to proceed inside task_id, epoch, and scope while still stopping for scope expansion, destructive operations, external sending, commits, cache refresh, plugin activation, or unrelated edits.
 `;
 }
 
@@ -593,6 +603,10 @@ function renderAssignments(context) {
 - ${DEBUG_INTEGRITY}
 - For debug or repair tasks, integration material must include expected outcome, actual failure, reproduction path, failure point, root cause, fix, and verification.
 
+## Nested Coding Agents Preflight
+
+- ${NESTED_CODING_AGENTS_PREFLIGHT}
+
 ${ROLES.map((role) => {
   const [status, assignment, expectedOutput] = assignments[role];
   return `## ${role}
@@ -623,6 +637,9 @@ You are a coding-agents worker for task \`${context.taskId}\`.
 
 Read \`${STATE_DIR_NAME}/README.md\`, then \`project.md\`, \`task.md\`, \`todo.md\`, \`decisions.md\`, \`assignments.md\`, \`audit.md\`, and \`runner.md\` if present.
 Preserve unrelated edits. Work only inside scope. Update \`${STATE_DIR_NAME}/audit.md\` with verification results before handoff.
+
+Nested Coding Agents preflight:
+- ${NESTED_CODING_AGENTS_PREFLIGHT}
 
 Debugging integrity:
 - ${DEBUG_INTEGRITY}
@@ -792,6 +809,7 @@ function renderAssignmentPacket(packet) {
 - target_cwd: ${packet.targetCwd}
 - assignment: ${packet.assignment}
 - expected_output: ${packet.expectedOutput}
+- nested_coding_agents_preflight: ${NESTED_CODING_AGENTS_PREFLIGHT}
 - debugging_integrity: ${DEBUG_INTEGRITY}
 - lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
 }
@@ -832,6 +850,7 @@ function renderOrchestrationSkeleton(packet) {
 - expected_output: ${packet.expectedOutput}
 - spawned: false
 - next: hand this assignment packet to an available subagent mechanism outside this MVP CLI
+- nested_coding_agents_preflight: ${NESTED_CODING_AGENTS_PREFLIGHT}
 - debugging_integrity: ${DEBUG_INTEGRITY}
 - lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
 }
@@ -869,6 +888,7 @@ function appendRunnerEntry(commandContext, heading, entry) {
 
 This file records CLI-issued assignments, parent-integration packets, process-orchestration skeletons, and process runner results.
 Subagents are closed or retired after integration, timeout/failure/blocker handling, stale premise/scope change, or final report when no further use is expected.
+${NESTED_CODING_AGENTS_PREFLIGHT}
 ${DEBUG_INTEGRITY}
 `;
   const current = existsSync(runnerPath) ? readFileSync(runnerPath, "utf8") : initial;
@@ -1246,6 +1266,7 @@ State:
   Existing docs/codex directories are migration input or hints only; they are never operational state fallback or write targets.
   State writes add .coding-agents/ to .git/info/exclude; .gitignore is not edited.
   Generated assignments, handoff prompts, and runner packets carry lifecycle closure and debugging integrity rules.
+  Parent-managed child-worker prompts also suppress nested Coding Agents preflight; child workers do not ask \`coding-agents を使いますか？ [Y/n]\` or start nested Coding Agents workflows inside an assigned task_id/epoch/scope.
   Debug or repair work must identify root cause and verify the intended outcome; log-only, fallback-only, skip-only, failure-output-only, or return-to-main-loop-only changes are not completion.
 `);
 }
