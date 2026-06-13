@@ -1,6 +1,6 @@
 ---
 name: coding-agents
-description: Use when the user wants the Coding Agents workflow or source CLI to intake a jobsite/target cwd, maintain the target git root's <git-root>/.coding-agents/ workflow state even when invoked cross-repo, assign/collect/run scoped specialist work with task_id/epoch/scope/lifecycle isolation, enforce prompt subagent close/retire handling, enforce debugging root-cause integrity for debug or repair work, print a handoff prompt, audit workflow state, or migrate legacy docs/codex material. Trigger for explicit requests to initialize, plan, execute, coordinate, or audit coding work with the coding-agents plugin or source MVP. Do not use for generic coding edits, and do not treat docs/codex as current workflow state.
+description: Use when the user wants the Coding Agents workflow or source CLI to intake a jobsite/target cwd, maintain the target git root's <git-root>/.coding-agents/ workflow state even when invoked cross-repo, assign/collect/run scoped specialist work with task_id/epoch/scope/lifecycle isolation, enforce prompt subagent close/retire handling, enforce debugging root-cause integrity and the metacognitive repair/debug gate for debug, repair, source-of-truth, plugin-contract, generated-artifact inconsistency, before/after context, or cross-feature consequences work, print a handoff prompt, audit workflow state, or migrate legacy docs/codex material. Trigger for explicit requests to initialize, plan, execute, coordinate, or audit coding work with the coding-agents plugin or source MVP. Do not use for generic coding edits, and do not treat docs/codex as current workflow state.
 ---
 
 # Coding Agents
@@ -45,6 +45,16 @@ Codex は、本書の発火前提、作業手順、ツール境界、ファイ�
 - The final Coding Agents report for debug or repair work must separate root cause, fix, and verification. If root cause remains unknown, report the work as unresolved or temporary containment and name the next investigation step.
 - Existing `.coding-agents` state created before this gate is stale when `assignments.md`, `handoff.md`, `runner.md`, or runner packets lack the debugging integrity gate. Do not weaken validation to accept it; normalize the state explicitly with `normalize-debugging-integrity --execute` or regenerate it with intake before treating verification as current.
 
+## Meta-Cognitive Debug/Repair Gate
+
+- This gate fires when the active task is debug, repair, source-of-truth correction, plugin-contract correction, generated-artifact inconsistency investigation, generated state versus source mismatch, cache/runtime versus source mismatch, stale contract repair, or any work where a local fix can change before/after context or cross-feature behavior.
+- Coding Agents must treat gate-required work as context-impact work, not only local patch work. Result quality degrades when Coding Agents stays local, so assignments, audits, handoffs, runner packets, and final reports must inspect before/after context effects and cross-feature consequences before claiming completion.
+- Gate-required work must separate the intended contract, observed mismatch, affected source/generated/cache/runtime surfaces, changed assumptions, neighboring feature impact, before-context effects, after-context effects, cross-feature consequences, verification performed, skipped checks, unresolved risks, and next investigation.
+- The parent must require workers to identify whether the mismatch is in source, generated workflow state, cache copy, runtime output, activation state, user request interpretation, or verification criteria before accepting a repair route.
+- The parent must reject local-wrapper fixes that preserve a faulty premise. Before adding an adapter, fallback, compatibility branch, defensive return, default filler, or wrapper workflow, reconsider whether the selected route, source-of-truth, plugin contract, data model, generated artifact, cache/runtime surface, or verification target is wrong.
+- Passive checklists, prose-only `debugging_integrity` text, log-only completion, fallback-only completion, skip-only completion, failure-output-only completion, and local-wrapper fixes without premise reconsideration are non-completion for gate-required work.
+- If a gate-required assignment cannot inspect neighboring features or before/after context within its scope, it must report the skipped check, why it was skipped, the risk that remains, and the next investigation that would close the gap.
+
 ## Subagent Operating Model
 
 - Before assigning real work, initialize an empty specialist warm pool for the job. The pool starts with no durable task state and waits for scoped assignments.
@@ -64,9 +74,9 @@ Codex は、本書の発火前提、作業手順、ツール境界、ファイ�
 - `<git-root>/.coding-agents/task.md`: current task SSOT, including purpose, scope, non-goals, and completion conditions.
 - `<git-root>/.coding-agents/todo.md`: executable checklist with stable task IDs.
 - `<git-root>/.coding-agents/decisions.md`: accepted decisions with IDs and implementation impact.
-- `<git-root>/.coding-agents/audit.md`: audit log, completed checks, skipped checks, next audit needs, and debug root-cause verification when the task is a debug or repair task.
-- `<git-root>/.coding-agents/assignments.md`: 14 role assignments. Each role must include `role`, `status`, `task_id`, `epoch`, `scope`, `assignment`, `expected_output`, and `lifecycle`; debug or repair tasks must also carry the debugging integrity gate.
-- `<git-root>/.coding-agents/handoff.md`: prompt material for the next worker to continue the task, including the subagent rule to return concise integration material, close or retire no-longer-needed workers promptly, and reject log-only or fallback-only debug completion.
+- `<git-root>/.coding-agents/audit.md`: audit log, completed checks, skipped checks, next audit needs, debug root-cause verification when the task is a debug or repair task, and context-impact or cross-feature checks when the Meta-Cognitive Debug/Repair Gate fires.
+- `<git-root>/.coding-agents/assignments.md`: 14 role assignments. Each role must include `role`, `status`, `task_id`, `epoch`, `scope`, `assignment`, `expected_output`, and `lifecycle`; debug or repair tasks must also carry the debugging integrity gate, and gate-required work must carry the Meta-Cognitive Debug/Repair Gate.
+- `<git-root>/.coding-agents/handoff.md`: prompt material for the next worker to continue the task, including the subagent rule to return concise integration material, close or retire no-longer-needed workers promptly, reject log-only or fallback-only debug completion, and include context-impact inspection plus cross-feature checks for gate-required work.
 - `<git-root>/.coding-agents/runner.md`: conditional operational log for `assign`, `collect`, `run`, `orchestrate`, parent-integration packets, and process results. Create or update it only when that activity occurs. Do not require `runner.md` for intake, specification, documentation-only, or audit flows that have no runner activity.
 
 ## Legacy `docs/codex`
@@ -95,7 +105,7 @@ Use the source CLI when the user wants to test source-tree behavior before plugi
    Apply only after confirming the target state directory:
    `node /Users/suzukimakoto/plugins/coding-agents/bin/coding-agents.mjs normalize-debugging-integrity --target-cwd <jobsite> --execute`.
 9. For `assign`, `collect`, `run`, or `orchestrate`, record operational packets in the jobsite repository's `.coding-agents/runner.md`.
-10. Ensure generated assignments, runner prompts, runner packets, and handoff material carry the nested Coding Agents preflight suppression rule, lifecycle rule, and debugging integrity gate: child workers do not ask `coding-agents を使いますか？ [Y/n]` or start nested Coding Agents workflows inside a parent-managed scoped assignment; subagents return concise integration material, stop waiting for more work, are closed or retired promptly when no longer needed, and do not claim debug completion through log-only, fallback-only, skip-only, or return-to-main-loop-only changes.
+10. Ensure generated assignments, runner prompts, runner packets, and handoff material carry the nested Coding Agents preflight suppression rule, lifecycle rule, debugging integrity gate, and Meta-Cognitive Debug/Repair Gate when it fires: child workers do not ask `coding-agents を使いますか？ [Y/n]` or start nested Coding Agents workflows inside a parent-managed scoped assignment; subagents return concise integration material, stop waiting for more work, are closed or retired promptly when no longer needed, do not claim debug completion through log-only, fallback-only, skip-only, or return-to-main-loop-only changes, and include context-impact inspection plus cross-feature checks for gate-required work.
 11. Treat marketplace registration, `~/.codex/plugins/cache/` refresh, and Codex restart/new-thread activation as separate work unless the user explicitly includes them.
 
 If source CLI output still names legacy `docs/codex`, treat that as source implementation drift to report or fix under the active task scope. Do not let legacy output redefine the current skill contract.
@@ -113,9 +123,9 @@ If source CLI output still names legacy `docs/codex`, treat that as source imple
 9. Create or update `.coding-agents/runner.md` only for `assign`, `collect`, `run`, `orchestrate`, parent-integration packet, or process-result activity.
 10. Normalize stale pre-gate `.coding-agents` state with `normalize-debugging-integrity` before relying on `verify-assignments` or `doctor` results.
 11. After every completed result integration, timeout/failure/blocker handling, stale premise, or scope change, close or retire subagents that are no longer needed before issuing new assignments.
-12. Verify implementation against the accepted decisions and completion conditions. For debug or repair work, verification must include root cause, fix, and evidence that the intended outcome now succeeds; otherwise mark the task unresolved or temporarily contained.
+12. Verify implementation against the accepted decisions and completion conditions. For debug or repair work, verification must include root cause, fix, and evidence that the intended outcome now succeeds; otherwise mark the task unresolved or temporarily contained. For Meta-Cognitive Debug/Repair Gate work, verification must also include intended contract, observed mismatch, affected source/generated/cache/runtime surfaces, changed assumptions, neighboring feature impact, before-context effects, after-context effects, cross-feature consequences, verification performed, skipped checks, unresolved risks, and next investigation.
 13. Before the final report, confirm no subagent remains open unless the user explicitly asked to keep it for a continued assignment.
-14. Append audit results to `.coding-agents/audit.md`, including checks not run and why.
+14. Append audit results to `.coding-agents/audit.md`, including checks not run and why. For gate-required work, include context-impact inspection and cross-feature checks or explicitly record why those checks were skipped.
 15. Report final status with changed files, verification, open risks, and next TODOs.
 
 ## File Boundaries
@@ -138,4 +148,4 @@ If source CLI output still names legacy `docs/codex`, treat that as source imple
 
 ## Output Shape
 
-Return concise parent-facing status in the user's language. Include changed files, verification or audit results, remaining blockers, unresolved TODOs, and any subagent lifecycle exception that remains open. For debug or repair work, explicitly separate root cause, fix, and verification; do not report completion when only logging, fallback, skipping, or failure-return behavior was added. Keep raw subagent logs out of the final answer unless the user asks for them.
+Return concise parent-facing status in the user's language. Include changed files, verification or audit results, remaining blockers, unresolved TODOs, and any subagent lifecycle exception that remains open. For debug or repair work, explicitly separate root cause, fix, and verification; do not report completion when only logging, fallback, skipping, or failure-return behavior was added. For Meta-Cognitive Debug/Repair Gate work, include context-impact inspection, cross-feature checks, skipped checks, unresolved risks, and next investigation. Keep raw subagent logs out of the final answer unless the user asks for them.

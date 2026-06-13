@@ -6,7 +6,7 @@ behavior. It is not workflow state and must not be treated as a generated
 
 ## Confirmed Boundary
 
-Items 1-6 are Coding Agents self changes. Item 7 is external legacy cleanup.
+Items 1-7 are Coding Agents self changes. Item 8 is external legacy cleanup.
 
 1. State directory
    - Coding Agents runtime/workflow state belongs under `<git-root>/.coding-agents/`.
@@ -60,7 +60,29 @@ Items 1-6 are Coding Agents self changes. Item 7 is external legacy cleanup.
      debugging integrity gate. Validation must not be weakened to accept stale
      state; use an explicit normalization command or regenerate intake state.
 
-6. Nested Coding Agents preflight suppression
+6. Meta-Cognitive Debug/Repair Gate
+   - Debug, repair, source-of-truth correction, plugin-contract correction,
+     generated-artifact inconsistency investigation, generated state versus
+     source mismatch, cache/runtime versus source mismatch, and stale contract
+     repair are context-impact work, not only local patch work.
+   - Assignments, audits, handoffs, runner packets, and final reports for this
+     gate must separate the intended contract, observed mismatch, affected
+     source/generated/cache/runtime surfaces, changed assumptions, neighboring
+     feature impact, before-context effects, after-context effects,
+     cross-feature consequences, verification performed, skipped checks,
+     unresolved risks, and next investigation.
+   - Result quality degrades when Coding Agents stays local. The workflow must
+     inspect before/after context effects and cross-feature consequences before
+     claiming completion for gate-required work.
+   - Passive checklists, prose-only `debugging_integrity`, log-only completion,
+     fallback-only completion, skip-only completion, failure-output-only
+     completion, and local-wrapper fixes without premise reconsideration are
+     non-completion for gate-required work.
+   - If neighboring feature or before/after context checks cannot be completed
+     inside the active scope, the skipped checks, reason, remaining risk, and
+     next investigation must be recorded instead of treating the gate as passed.
+
+7. Nested Coding Agents preflight suppression
    - Parent-managed child workers operate under a Coding Agents assignment that
      the parent already selected.
    - Generated assignments, runner prompts, runner packets, and handoff material
@@ -71,7 +93,7 @@ Items 1-6 are Coding Agents self changes. Item 7 is external legacy cleanup.
      operations, external sending, commits, cache refresh, plugin activation, or
      unrelated edits.
 
-7. Legacy migration and cleanup
+8. Legacy migration and cleanup
    - Existing legacy locations are cleaned through an explicit migration workflow,
      not by silent deletion or broad automatic rewriting.
    - The migration workflow must perform a preflight backup before destructive or
@@ -99,8 +121,9 @@ Future implementation work should preserve this split:
   from the plugin repository does not make the plugin repository the state owner
   when `--target-cwd` or an explicit target points elsewhere.
 - Generated job state must preserve nested Coding Agents preflight suppression,
-  subagent lifecycle closure, concise integration-output rules, and debug
-  root-cause completion requirements.
+  subagent lifecycle closure, concise integration-output rules, debug
+  root-cause completion requirements, and metacognitive context-impact checks
+  for gate-required work.
 - Stale generated state must be normalized explicitly before verification is
   treated as current.
 - Legacy cleanup work may inspect external target repositories but must remain

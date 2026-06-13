@@ -19,8 +19,73 @@ const CHILD_RETURN_LIFECYCLE =
   "Return concise parent-integration material and stop; do not stay open waiting for more work.";
 const DEBUG_INTEGRITY =
   "For debug or repair work, identify root cause and make the intended outcome succeed; log-only, fallback-only, skip-only, failure-output-only, or return-to-main-loop-only changes are not completion.";
+const METACOGNITIVE_GATE_NAME = "Meta-Cognitive Debug/Repair Gate";
+const METACOGNITIVE_GATE_CONTRACT =
+  "For gate-required debug/repair/SOT/plugin-contract/generated-artifact inconsistency work, explicitly capture before/after context effects, cross-feature consequences, root cause, fix, verification evidence, skipped checks, unresolved risks, and next investigation.";
+const METACOGNITIVE_GATE_COMPLETION_PROMPT =
+  "Assignment and skeleton packets expose this schema only; completed parent-integration or process-runner-result packets must fill every listed field with actual evidence.";
+const METACOGNITIVE_PRE_GATE_BLOCKER =
+  "pre-metacognitive-gate packet claimed completion without the required metacognitive result fields";
+const METACOGNITIVE_PRE_GATE_NEXT =
+  "re-run or recollect the work with completed metacognitive gate fields before treating it as completion";
 const NESTED_CODING_AGENTS_PREFLIGHT =
   "Parent already selected Coding Agents for this parent-managed scoped assignment; do not ask `coding-agents を使いますか？ [Y/n]` and do not start a nested Coding Agents workflow. Proceed directly within the assigned task_id/epoch/scope, but stop before scope expansion, destructive operations, external sending, commits, cache refresh, plugin activation, or unrelated edits.";
+
+const METACOGNITIVE_GATE_FIELDS = [
+  "expected_outcome",
+  "actual_result",
+  "reproduction_or_evidence",
+  "failure_point",
+  "hypothesis_branches",
+  "source_of_truth_boundary",
+  "plugin_contract_boundary",
+  "generated_artifact_boundary",
+  "before_context_effects",
+  "after_context_effects",
+  "cross_feature_consequences",
+  "root_cause",
+  "fix_summary",
+  "verification_evidence",
+  "skipped_checks",
+  "unresolved_risks",
+  "next_investigation",
+];
+
+const METACOGNITIVE_TRIGGER_PATTERNS = [
+  ["debug", /\bdebug(?:ging)?\b/i],
+  ["repair", /\brepair\b/i],
+  ["bug fix", /\bbug[-\s]?fix(?:es)?\b|\bfix(?:ing)?\s+(?:a\s+)?bug\b/i],
+  ["test failure", /\btest\s+fail(?:ure|ing|ed)?\b|\bfailing\s+test\b/i],
+  ["regression", /\bregression\b/i],
+  ["not working", /\bnot\s+working\b|\bdoes(?:\s+not|n't)\s+work\b/i],
+  ["expected result not produced", /\bexpected\s+result\s+(?:is\s+)?not\s+produced\b|\bexpected\s+(?:outcome|result).*\bnot\s+(?:produced|returned|generated)\b/i],
+  ["source-of-truth", /\bsource[-\s]of[-\s]truth\b|\bSOT\b/i],
+  ["plugin-contract", /\bplugin[-\s]contract\b/i],
+  ["generated-artifact inconsistency", /\bgenerated[-\s]artifact\s+inconsisten(?:cy|t)\b/i],
+  ["contract drift", /\bcontract\s+drift\b/i],
+  ["stale/generated state", /\bstale\s*\/\s*generated\s+state\b|\bstale\s+generated\s+state\b|\bstale\s+state\b|\bgenerated\s+state\b/i],
+  ["cache/runtime source mismatch", /\b(?:cache|runtime|source)\s*(?:\/|\\|and|or|versus|vs\.?)\s*(?:cache|runtime|source)\s+mismatch\b|\b(?:cache|runtime)\s+(?:copy\s+)?(?:differs?|drift(?:ed)?|mismatch(?:es|ed)?)\s+(?:from|with|against)\s+source\b|\bsource\s+(?:differs?|drift(?:ed)?|mismatch(?:es|ed)?)\s+(?:from|with|against)\s+(?:cache|runtime)\b/i],
+  ["final artifact mismatch", /\bfinal\s+artifact\s+mismatch\b/i],
+  ["before/after context", /\bbefore\s*\/\s*after\s+context\b|\bbefore\s+and\s+after\s+context\b/i],
+  ["cross-feature consequence", /\bcross[-\s]feature\s+consequence/i],
+];
+
+const METACOGNITIVE_BOUNDARY_FIELDS = new Set([
+  "source_of_truth_boundary",
+  "plugin_contract_boundary",
+  "generated_artifact_boundary",
+]);
+
+const METACOGNITIVE_CONTEXT_FIELDS = new Set([
+  "before_context_effects",
+  "after_context_effects",
+  "cross_feature_consequences",
+]);
+
+const METACOGNITIVE_VERIFICATION_FIELDS = new Set([
+  "verification",
+  "verification_evidence",
+]);
 
 const ROLES = [
   "Intake",
@@ -109,6 +174,7 @@ function intake(args) {
   const taskId = requireArg(args.taskId, "--task-id");
   const epoch = requireArg(args.epoch, "--epoch");
   const scope = requireArg(args.scope, "--scope");
+  const metacognitiveGate = classifyMetacognitiveGate({ task, scope });
   const state = resolveWorkflowState(commandContext.targetCwd);
   prepareStateWrite(state);
   mkdirSync(state.stateDir, { recursive: true });
@@ -125,6 +191,7 @@ function intake(args) {
     gitRoot: state.gitRoot,
     timestamp: new Date().toISOString(),
     gitStatus: readGitStatus(commandContext.targetCwd),
+    metacognitiveGate,
   };
 
   for (const [file, body] of Object.entries(renderDocs(context))) {
@@ -136,6 +203,8 @@ function intake(args) {
   console.log(`ok task_id: ${taskId}`);
   console.log(`ok epoch: ${epoch}`);
   console.log(`ok scope: ${scope}`);
+  console.log(`ok metacognitive_gate_required: ${metacognitiveGate.required}`);
+  if (metacognitiveGate.required) console.log(`ok metacognitive_gate_triggers: ${metacognitiveGate.triggers.join(", ")}`);
   printLegacyHints(state);
 }
 
@@ -251,8 +320,16 @@ function normalizeCodexResult(packet, context) {
   const exitCode = typeof result.status === "number" ? result.status : null;
   const lastMessage = existsSync(outputPath) ? readFileSync(outputPath, "utf8") : "";
   const summarySource = lastMessage || result.stdout || result.stderr || result.error?.message || "";
-  const status = !result.error && exitCode === 0 ? "completed" : "failed";
-  const failure = runnerFailure({ result, exitCode, timedOut, unavailable, timeoutMs });
+  const baseStatus = !result.error && exitCode === 0 ? "completed" : "failed";
+  const metacognitiveFields = extractMetacognitiveFields(summarySource);
+  const missingMetacognitiveFields =
+    packet.metacognitiveGate?.required && baseStatus === "completed"
+      ? missingCompletedMetacognitiveFields(metacognitiveFields)
+      : [];
+  const status = missingMetacognitiveFields.length ? "failed" : baseStatus;
+  const failure = missingMetacognitiveFields.length
+    ? `completed runner result missing metacognitive gate fields: ${missingMetacognitiveFields.join(", ")}`
+    : runnerFailure({ result, exitCode, timedOut, unavailable, timeoutMs });
 
   return {
     type: "process-runner-result",
@@ -273,6 +350,8 @@ function normalizeCodexResult(packet, context) {
     expectedOutput: packet.expectedOutput,
     summary: summarizeRunnerOutput(summarySource),
     failure,
+    metacognitiveGate: packet.metacognitiveGate,
+    metacognitiveFields,
   };
 }
 
@@ -307,6 +386,7 @@ Boundaries:
 - Do not edit ~/.codex/plugins/cache directly.
 - Do not claim success for unavailable, skipped, or failed checks.
 - ${DEBUG_INTEGRITY}
+${renderRunnerPromptMetacognitiveGate(packet)}
 
 Lifecycle:
 - ${CHILD_RETURN_LIFECYCLE}
@@ -318,6 +398,7 @@ Return exactly these sections, kept concise:
 - verification:
 - blockers:
 - unresolved_assumptions:
+${renderMetacognitiveReturnSections(packet)}
 - next:
 `;
 }
@@ -340,10 +421,14 @@ function normalizeDebuggingIntegrity(args) {
   if (!existsSync(stateDir)) {
     throw new CliError(`missing workflow state directory: ${stateDir}`, 1);
   }
+  const workflowGate = readWorkflowMetacognitiveContext(stateDir);
 
   const normalizers = {
     "README.md": normalizeReadmeDebugIntegrity,
+    "project.md": normalizeGeneratedWorkflowDocument,
     "task.md": normalizeTaskDebugIntegrity,
+    "todo.md": normalizeGeneratedWorkflowDocument,
+    "decisions.md": normalizeGeneratedWorkflowDocument,
     "audit.md": normalizeAuditDebugIntegrity,
     "assignments.md": normalizeAssignmentsDebugIntegrity,
     "handoff.md": normalizeHandoffDebugIntegrity,
@@ -355,7 +440,7 @@ function normalizeDebuggingIntegrity(args) {
     const filePath = path.join(stateDir, file);
     if (!existsSync(filePath)) continue;
     const current = readFileSync(filePath, "utf8");
-    const next = normalize(current);
+    const next = normalize(current, { workflowGate });
     if (next !== current) updates.push({ file, filePath, next });
   }
 
@@ -363,7 +448,7 @@ function normalizeDebuggingIntegrity(args) {
   console.log(`Mode: ${mode}`);
   console.log(`State dir: ${stateDir}`);
   if (updates.length === 0) {
-    console.log("No debugging integrity normalization needed.");
+    console.log("No debugging integrity or metacognitive gate normalization needed.");
     printLegacyHints(state);
     return;
   }
@@ -477,6 +562,7 @@ Operational log:
 - Subagents are active only for scoped work and must be closed or retired promptly when their result is integrated, blocked, failed, timed out, stale, or no longer needed.
 - ${NESTED_CODING_AGENTS_PREFLIGHT}
 - ${DEBUG_INTEGRITY}
+${renderMetacognitiveGateState(context.metacognitiveGate)}
 `;
 }
 
@@ -503,6 +589,10 @@ function renderTask(context) {
 - scope: ${context.scope}
 - task: ${context.task}
 
+## ${METACOGNITIVE_GATE_NAME}
+
+${renderMetacognitiveGateState(context.metacognitiveGate)}
+
 ## Completion Conditions
 
 - Eight planning files exist in \`${STATE_DIR_NAME}\`.
@@ -510,6 +600,7 @@ function renderTask(context) {
 - Each generated assignment carries lifecycle guidance requiring concise integration material and prompt close/retire handling.
 - Each generated child-worker prompt, assignment, handoff, and runner packet carries the nested Coding Agents preflight suppression rule.
 - Debug or repair work is not complete until root cause is identified, fixed, and verified against the intended outcome.
+- If \`metacognitive_gate_required: true\`, assignments, runner prompts, runner packets, and completed parent-integration packets must carry all metacognitive gate fields.
 - Handoff prompt is available for the next worker.
 `;
 }
@@ -552,6 +643,12 @@ function renderDecisions(context) {
 
 - accepted: parent-managed child workers must not ask whether to use Coding Agents again or start a nested Coding Agents workflow.
 - impact: generated worker material must direct child workers to proceed inside task_id, epoch, and scope while still stopping for scope expansion, destructive operations, external sending, commits, cache refresh, plugin activation, or unrelated edits.
+
+## D-${context.taskId}-006 ${METACOGNITIVE_GATE_NAME}
+
+- accepted: metacognitive_gate_required=${context.metacognitiveGate.required} for this task.
+- triggers: ${formatTriggers(context.metacognitiveGate)}
+- impact: gate-required work must record expected/actual outcome evidence, boundaries, before/after context effects, cross-feature consequences, root cause, fix, verification, skipped checks, unresolved risks, and next investigation before completion is accepted.
 `;
 }
 
@@ -569,12 +666,15 @@ function renderAudit(context) {
 - epoch: ${context.epoch}
 - scope: ${context.scope}
 - git_status: ${context.gitStatus.ok ? summarizeGit(context.gitStatus.output) : `unavailable (${context.gitStatus.error})`}
+- metacognitive_gate_required: ${context.metacognitiveGate.required}
+- metacognitive_gate_triggers: ${formatTriggers(context.metacognitiveGate)}
 
 ## Pending Audit
 
 - Run implementation checks for the active task.
 - Record skipped checks with reasons.
 - For debug or repair work, record root cause, fix, and verification that the intended outcome now succeeds.
+- If metacognitive_gate_required is true, record ${METACOGNITIVE_GATE_FIELDS.join(", ")}.
 `;
 }
 
@@ -603,6 +703,10 @@ function renderAssignments(context) {
 - ${DEBUG_INTEGRITY}
 - For debug or repair tasks, integration material must include expected outcome, actual failure, reproduction path, failure point, root cause, fix, and verification.
 
+## ${METACOGNITIVE_GATE_NAME}
+
+${renderMetacognitiveGateState(context.metacognitiveGate)}
+
 ## Nested Coding Agents Preflight
 
 - ${NESTED_CODING_AGENTS_PREFLIGHT}
@@ -618,6 +722,7 @@ ${ROLES.map((role) => {
 - scope: ${context.scope}
 - assignment: ${assignment}
 - expected_output: ${expectedOutput}
+${renderMetacognitiveGatePacketSchema(context.metacognitiveGate)}
 - lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
 }).join("\n\n")}
 `;
@@ -646,6 +751,9 @@ Debugging integrity:
 - If root cause remains unknown, report unresolved or temporary containment and name the next investigation step.
 - Separate root cause, fix, and verification in debug or repair summaries.
 
+${METACOGNITIVE_GATE_NAME}:
+${renderMetacognitiveGateState(context.metacognitiveGate)}
+
 Subagent lifecycle:
 - Child workers return concise parent-integration material and stop instead of waiting for more work.
 - The parent closes or retires subagents after completed result integration, timeout/failure/blocker handling, stale premise/scope change, and before final report when no further use is expected.
@@ -653,69 +761,93 @@ Subagent lifecycle:
 `;
 }
 
-function normalizeReadmeDebugIntegrity(text) {
+function normalizeGeneratedWorkflowDocument(text) {
+  return stripGeneratedWorkflowSurroundings(text);
+}
+
+function normalizeReadmeDebugIntegrity(text, context = {}) {
   const block = `- ${DEBUG_INTEGRITY}`;
   const lifecycleLine =
     "- Subagents are active only for scoped work and must be closed or retired promptly when their result is integrated, blocked, failed, timed out, stale, or no longer needed.";
-  let next = text.replace(
+  let next = stripGeneratedWorkflowSurroundings(text).replace(
     new RegExp(
       `^- Subagents are active only for scoped work and must be closed or retired promptly\\n- ${escapeRegExp(DEBUG_INTEGRITY)} when their result is integrated, blocked, failed, timed out, stale, or no longer needed\\.$`,
       "m",
     ),
     `${lifecycleLine}\n${block}`,
   );
-  if (next.includes(DEBUG_INTEGRITY)) return next;
-  return insertAfterLineMatching(
-    next,
-    new RegExp(`^${escapeRegExp(lifecycleLine)}$`, "m"),
-    block,
-    `## Debugging Integrity\n\n${block}`,
-  );
+  if (!next.includes(DEBUG_INTEGRITY)) {
+    next = insertAfterLineMatching(
+      next,
+      new RegExp(`^${escapeRegExp(lifecycleLine)}$`, "m"),
+      block,
+      `## Debugging Integrity\n\n${block}`,
+    );
+  }
+  return normalizeDocumentMetacognitiveGate(next, context.workflowGate);
 }
 
-function normalizeTaskDebugIntegrity(text) {
+function normalizeTaskDebugIntegrity(text, context = {}) {
   const block = "- Debug or repair work is not complete until root cause is identified, fixed, and verified against the intended outcome.";
   const lifecycleLine =
     "- Each generated assignment carries lifecycle guidance requiring concise integration material and prompt close/retire handling.";
-  let next = text.replace(
+  let next = stripGeneratedWorkflowSurroundings(text).replace(
     new RegExp(
       `^- Each generated assignment carries lifecycle guidance\\n${escapeRegExp(block)} requiring concise integration material and prompt close/retire handling\\.$`,
       "m",
     ),
     `${lifecycleLine}\n${block}`,
   );
-  if (next.includes("Debug or repair work is not complete until root cause is identified")) return next;
-  return insertAfterLineMatching(next, new RegExp(`^${escapeRegExp(lifecycleLine)}$`, "m"), block, block);
+  if (!next.includes("Debug or repair work is not complete until root cause is identified")) {
+    next = insertAfterLineMatching(next, new RegExp(`^${escapeRegExp(lifecycleLine)}$`, "m"), block, block);
+  }
+  return normalizeTaskMetacognitiveGate(next, context.workflowGate);
 }
 
-function normalizeAuditDebugIntegrity(text) {
-  if (text.includes("For debug or repair work, record root cause")) return text;
+function normalizeAuditDebugIntegrity(text, context = {}) {
+  let next = stripGeneratedWorkflowSurroundings(text);
   const block = "- For debug or repair work, record root cause, fix, and verification that the intended outcome now succeeds.";
-  return insertAfterLineMatching(text, /^- Record skipped checks with reasons\./m, block, block);
+  if (!next.includes("For debug or repair work, record root cause")) {
+    next = insertAfterLineMatching(next, /^- Record skipped checks with reasons\./m, block, block);
+  }
+  if (context.workflowGate?.required && !next.includes("If metacognitive_gate_required is true")) {
+    next = insertAfterLineMatching(
+      next,
+      /^- For debug or repair work, record root cause.*$/m,
+      `- If metacognitive_gate_required is true, record ${METACOGNITIVE_GATE_FIELDS.join(", ")} before accepting completion.`,
+      `- If metacognitive_gate_required is true, record ${METACOGNITIVE_GATE_FIELDS.join(", ")} before accepting completion.`,
+    );
+  }
+  return next;
 }
 
-function normalizeAssignmentsDebugIntegrity(text) {
-  if (text.includes(DEBUG_INTEGRITY)) return text;
+function normalizeAssignmentsDebugIntegrity(text, context = {}) {
+  let next = stripGeneratedWorkflowSurroundings(text);
   const block = `## Debugging Integrity Gate
 
 - ${DEBUG_INTEGRITY}
 - For debug or repair tasks, integration material must include expected outcome, actual failure, reproduction path, failure point, root cause, fix, and verification.`;
-  return insertAfterHeading(text, "# Role Assignments", block);
+  if (!next.includes(DEBUG_INTEGRITY)) next = insertAfterHeading(next, "# Role Assignments", block);
+  return normalizeAssignmentsMetacognitiveGate(next, context.workflowGate);
 }
 
-function normalizeHandoffDebugIntegrity(text) {
-  if (text.includes("Debugging integrity:")) return text;
+function normalizeHandoffDebugIntegrity(text, context = {}) {
+  let next = stripGeneratedWorkflowSurroundings(text);
   const block = `Debugging integrity:
 - ${DEBUG_INTEGRITY}
 - If root cause remains unknown, report unresolved or temporary containment and name the next investigation step.
 - Separate root cause, fix, and verification in debug or repair summaries.`;
-  if (/^Subagent lifecycle:$/m.test(text)) {
-    return text.replace(/^Subagent lifecycle:$/m, `${block}\n\nSubagent lifecycle:`);
+  if (!next.includes("Debugging integrity:")) {
+    if (/^Subagent lifecycle:$/m.test(next)) {
+      next = next.replace(/^Subagent lifecycle:$/m, `${block}\n\nSubagent lifecycle:`);
+    } else {
+      next = `${next.trimEnd()}\n\n${block}\n`;
+    }
   }
-  return `${text.trimEnd()}\n\n${block}\n`;
+  return normalizeDocumentMetacognitiveGate(next, context.workflowGate);
 }
 
-function normalizeRunnerDebugIntegrity(text) {
+function normalizeRunnerDebugIntegrity(text, context = {}) {
   let next = text;
   if (!next.includes(DEBUG_INTEGRITY)) {
     next = insertAfterLineMatching(
@@ -727,10 +859,16 @@ function normalizeRunnerDebugIntegrity(text) {
   }
 
   const firstPacket = next.search(/^### /m);
-  if (firstPacket === -1) return next;
+  if (firstPacket === -1) return normalizeDocumentMetacognitiveGate(next, context.workflowGate);
   const preamble = next.slice(0, firstPacket);
   const packets = next.slice(firstPacket).split(/^### /m).filter(Boolean).map((packet) => `### ${packet}`);
-  return preamble + packets.map(normalizeRunnerPacketDebugIntegrity).join("");
+  const normalizedPreamble = validateMetacognitiveGateText(next).valid
+    ? preamble
+    : normalizeDocumentMetacognitiveGate(preamble, context.workflowGate);
+  return normalizedPreamble + packets.map((packet) => normalizeRunnerPacketMetacognitiveGate(
+    normalizeRunnerPacketDebugIntegrity(packet),
+    context.workflowGate,
+  )).join("");
 }
 
 function normalizeRunnerPacketDebugIntegrity(section) {
@@ -742,9 +880,102 @@ function normalizeRunnerPacketDebugIntegrity(section) {
   return insertFieldBeforeLifecycle(section, "debugging_integrity", DEBUG_INTEGRITY);
 }
 
+function normalizeDocumentMetacognitiveGate(text, gate) {
+  if (!gate?.required || validateMetacognitiveGateText(text).valid) return text;
+  const block = `## ${METACOGNITIVE_GATE_NAME}
+
+${renderMetacognitiveGateState(gate)}`;
+  if (text.includes(DEBUG_INTEGRITY)) {
+    return insertAfterLineMatching(text, new RegExp(`^- ${escapeRegExp(DEBUG_INTEGRITY)}$`, "m"), block, block);
+  }
+  return `${text.trimEnd()}\n\n${block}\n`;
+}
+
+function normalizeTaskMetacognitiveGate(text, gate) {
+  if (!gate?.required || validateMetacognitiveGateText(text).valid) return text;
+  const block = `## ${METACOGNITIVE_GATE_NAME}
+
+${renderMetacognitiveGateState(gate)}`;
+  if (/^- task: .*$/m.test(text)) {
+    return insertAfterLineMatching(text, /^- task: .*$/m, block, block);
+  }
+  if (/^## Completion Conditions$/m.test(text)) {
+    return text.replace(/^## Completion Conditions$/m, `${block}\n\n## Completion Conditions`);
+  }
+  return `${text.trimEnd()}\n\n${block}\n`;
+}
+
+function normalizeAssignmentsMetacognitiveGate(text, gate) {
+  if (!gate?.required) return text;
+  let next = text;
+  if (!validateMetacognitiveGateText(next).valid) {
+    const block = `## ${METACOGNITIVE_GATE_NAME}
+
+${renderMetacognitiveGateState(gate)}`;
+    next = insertAfterHeading(next, "# Role Assignments", block);
+  }
+  for (const role of ROLES) {
+    const section = getRoleSection(next, role);
+    if (!section || validateMetacognitiveGateText(section).valid) continue;
+    next = next.replace(section, ensureMetacognitiveGateSchemaInSection(section, gate));
+  }
+  return next;
+}
+
+function normalizeRunnerPacketMetacognitiveGate(section, workflowGate) {
+  const type = getFieldValue(section, "type");
+  if (!["assignment", "parent-integration", "process-orchestration-skeleton", "process-runner-result"].includes(type)) {
+    return section;
+  }
+  const packetGate = runnerPacketMetacognitiveRequired(section, workflowGate);
+  if (!packetGate.required) return section;
+
+  let next = ensureMetacognitiveGateSchemaInSection(section, packetGate);
+  const status = (getFieldValue(next, "status") || "").toLowerCase();
+  if (isCompletionPacketType(type) && status === "completed") {
+    const missing = missingCompletedMetacognitiveFields(readMetacognitiveFieldsFromSection(next));
+    if (missing.length) next = markPreGateCompletionUnresolved(next, type);
+  }
+  return next;
+}
+
+function ensureMetacognitiveGateSchemaInSection(section, gate) {
+  let next = section;
+  for (const line of renderMetacognitiveGatePacketSchema(gate).split("\n").filter(Boolean)) {
+    const match = /^- ([^:]+):\s*(.*)$/.exec(line);
+    if (!match) continue;
+    next = upsertFieldBeforeLifecycle(next, match[1], match[2]);
+  }
+  return next;
+}
+
+function markPreGateCompletionUnresolved(section, type) {
+  let next = upsertFieldBeforeLifecycle(section, "status", "unresolved", { replace: true });
+  const blockerField = type === "process-runner-result" ? "failure" : "blockers";
+  next = upsertFieldBeforeLifecycle(next, blockerField, METACOGNITIVE_PRE_GATE_BLOCKER, {
+    replaceIfEmptyOrNone: true,
+  });
+  next = upsertFieldBeforeLifecycle(next, "next_investigation", METACOGNITIVE_PRE_GATE_NEXT, {
+    replaceIfEmptyOrNone: true,
+  });
+  return next;
+}
+
 function insertFieldBeforeLifecycle(section, field, value) {
+  return upsertFieldBeforeLifecycle(section, field, value);
+}
+
+function upsertFieldBeforeLifecycle(section, field, value, options = {}) {
   const line = `- ${field}: ${value}`;
-  if (new RegExp(`^- ${escapeRegExp(field)}:`, "m").test(section)) return section;
+  const pattern = new RegExp(`^- ${escapeRegExp(field)}:\\s*(.*)$`, "m");
+  const match = pattern.exec(section);
+  if (match) {
+    const current = match[1].trim();
+    if (options.replace || (options.replaceIfEmptyOrNone && (!current || current === "none"))) {
+      return section.replace(pattern, line);
+    }
+    return section;
+  }
   if (/^- lifecycle:/m.test(section)) return section.replace(/^- lifecycle:/m, `${line}\n- lifecycle:`);
   return `${section.trimEnd()}\n${line}\n`;
 }
@@ -761,7 +992,7 @@ function insertAfterLineMatching(text, pattern, block, fallback) {
 }
 
 function requireAssignmentPacket(args, commandContext) {
-  return {
+  const packet = {
     type: "assignment",
     timestamp: new Date().toISOString(),
     role: requireRole(args.role),
@@ -774,10 +1005,15 @@ function requireAssignmentPacket(args, commandContext) {
     assignment: singleLine(requireArg(args.assignment, "--assignment")),
     expectedOutput: singleLine(requireArg(args.expectedOutput, "--expected-output")),
   };
+  packet.metacognitiveGate = resolvePacketMetacognitiveGate(commandContext, packet);
+  if (packet.metacognitiveGate.required) {
+    assertWorkflowMetacognitiveGateReady(commandContext, packet.taskId, packet.metacognitiveGate);
+  }
+  return packet;
 }
 
 function requireIntegrationPacket(args, commandContext) {
-  return {
+  const packet = {
     type: "parent-integration",
     timestamp: new Date().toISOString(),
     role: requireRole(args.role),
@@ -794,6 +1030,10 @@ function requireIntegrationPacket(args, commandContext) {
     assumptions: singleLine(args.assumptions || "none"),
     next: singleLine(args.next || "parent integrate packet"),
   };
+  packet.metacognitiveGate = resolvePacketMetacognitiveGate(commandContext, packet);
+  packet.metacognitiveFields = readMetacognitiveArgs(args);
+  validateIntegrationMetacognitivePacket(commandContext, packet);
+  return packet;
 }
 
 function renderAssignmentPacket(packet) {
@@ -811,6 +1051,7 @@ function renderAssignmentPacket(packet) {
 - expected_output: ${packet.expectedOutput}
 - nested_coding_agents_preflight: ${NESTED_CODING_AGENTS_PREFLIGHT}
 - debugging_integrity: ${DEBUG_INTEGRITY}
+${renderMetacognitiveGatePacketSchema(packet.metacognitiveGate)}
 - lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
 }
 
@@ -832,6 +1073,10 @@ function renderIntegrationPacket(packet) {
 - assumptions: ${packet.assumptions}
 - next: ${packet.next}
 - debugging_integrity: ${DEBUG_INTEGRITY}
+${renderMetacognitiveGatePacketSchema(packet.metacognitiveGate)}
+${renderMetacognitiveResultFields(packet.metacognitiveGate, "not completed", packet.metacognitiveFields, {
+  includeAll: packet.status.toLowerCase() === "completed",
+})}
 - lifecycle: Parent integrates this packet, records any blocker or follow-up, then closes or retires the subagent unless an explicitly scoped continuation is required.`;
 }
 
@@ -852,6 +1097,7 @@ function renderOrchestrationSkeleton(packet) {
 - next: hand this assignment packet to an available subagent mechanism outside this MVP CLI
 - nested_coding_agents_preflight: ${NESTED_CODING_AGENTS_PREFLIGHT}
 - debugging_integrity: ${DEBUG_INTEGRITY}
+${renderMetacognitiveGatePacketSchema(packet.metacognitiveGate)}
 - lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
 }
 
@@ -876,6 +1122,10 @@ function renderRunnerResult(result) {
 - summary: ${result.summary || "none"}
 - failure: ${result.failure}
 - debugging_integrity: ${DEBUG_INTEGRITY}
+${renderMetacognitiveGatePacketSchema(result.metacognitiveGate)}
+${renderMetacognitiveResultFields(result.metacognitiveGate, "missing from runner result", result.metacognitiveFields, {
+  includeAll: result.status === "completed",
+})}
 - lifecycle: ${renderRunnerLifecycle(result)}`;
 }
 
@@ -890,6 +1140,7 @@ This file records CLI-issued assignments, parent-integration packets, process-or
 Subagents are closed or retired after integration, timeout/failure/blocker handling, stale premise/scope change, or final report when no further use is expected.
 ${NESTED_CODING_AGENTS_PREFLIGHT}
 ${DEBUG_INTEGRITY}
+${METACOGNITIVE_GATE_CONTRACT}
 `;
   const current = existsSync(runnerPath) ? readFileSync(runnerPath, "utf8") : initial;
   writeFileSync(runnerPath, appendUnderHeading(current, heading, entry), "utf8");
@@ -920,6 +1171,7 @@ function validateAssignmentFiles(stateDir) {
   let fatal = false;
   let checkedFiles = 0;
   const assignmentPath = path.join(stateDir, "assignments.md");
+  const workflowGate = readWorkflowMetacognitiveContext(stateDir);
 
   if (!existsSync(stateDir)) {
     return { results: [["warn", `missing workflow state directory: ${stateDir}`]], fatal: true };
@@ -928,7 +1180,7 @@ function validateAssignmentFiles(stateDir) {
   if (existsSync(assignmentPath)) {
     checkedFiles += 1;
     const text = readFileSync(assignmentPath, "utf8");
-    const roleValidation = validateRoleAssignments(text);
+    const roleValidation = validateRoleAssignments(text, workflowGate);
     results.push(...roleValidation.results);
     fatal = fatal || roleValidation.fatal;
   }
@@ -936,7 +1188,7 @@ function validateAssignmentFiles(stateDir) {
   const runnerPath = path.join(stateDir, RUNNER_FILE);
   if (existsSync(runnerPath)) {
     checkedFiles += 1;
-    const runnerValidation = validateRunnerPackets(readFileSync(runnerPath, "utf8"));
+    const runnerValidation = validateRunnerPackets(readFileSync(runnerPath, "utf8"), workflowGate);
     results.push(...runnerValidation.results);
     fatal = fatal || runnerValidation.fatal;
   }
@@ -949,11 +1201,12 @@ function validateAssignmentFiles(stateDir) {
   return { results, fatal };
 }
 
-function validateRoleAssignments(text) {
+function validateRoleAssignments(text, workflowGate = { required: false }) {
   const results = [];
   let fatal = false;
   const missingRoles = ROLES.filter((role) => !new RegExp(`^## ${escapeRegExp(role)}$`, "m").test(text));
   const invalidFields = [];
+  const invalidMetacognitiveFields = [];
 
   for (const role of ROLES) {
     const section = getRoleSection(text, role);
@@ -961,6 +1214,10 @@ function validateRoleAssignments(text) {
       if (!getFieldValue(section, field)) {
         invalidFields.push(`${role}.${field}`);
       }
+    }
+    if (workflowGate.required) {
+      const roleGate = validateMetacognitiveGateText(section);
+      for (const missing of roleGate.missing) invalidMetacognitiveFields.push(`${role}.${missing}`);
     }
   }
 
@@ -982,12 +1239,28 @@ function validateRoleAssignments(text) {
     fatal = true;
   }
 
+  if (workflowGate.required) {
+    const assignmentGate = validateMetacognitiveGateText(text);
+    if (assignmentGate.valid) results.push(["ok", "metacognitive gate present in assignments"]);
+    else {
+      results.push(["warn", `metacognitive gate missing from assignments: ${assignmentGate.missing.join(", ")}`]);
+      fatal = true;
+    }
+
+    if (invalidMetacognitiveFields.length === 0) results.push(["ok", "metacognitive assignment fields are present"]);
+    else {
+      results.push(["warn", `missing or empty metacognitive assignment fields: ${invalidMetacognitiveFields.join(", ")}`]);
+      fatal = true;
+    }
+  }
+
   return { results, fatal };
 }
 
-function validateRunnerPackets(text) {
+function validateRunnerPackets(text, workflowGate = { required: false }) {
   const sections = text.split(/^### /m).slice(1).map((section) => `### ${section}`);
   const invalidPackets = [];
+  const invalidMetacognitivePackets = [];
   let checked = 0;
 
   for (const section of sections) {
@@ -1020,12 +1293,409 @@ function validateRunnerPackets(text) {
         }
       }
     }
+
+    const packetGate = runnerPacketMetacognitiveRequired(section, workflowGate);
+    if (packetGate.required) {
+      const gateValidation = validateMetacognitiveGateText(section);
+      if (!gateValidation.valid) {
+        invalidMetacognitivePackets.push(`${packetLabel(section)}.${gateValidation.missing.join("+")}`);
+      }
+
+      const status = (getFieldValue(section, "status") || "").toLowerCase();
+      if (isCompletionPacketType(type) && status === "completed") {
+        const missing = missingCompletedMetacognitiveFields(readMetacognitiveFieldsFromSection(section));
+        for (const field of missing) invalidMetacognitivePackets.push(`${packetLabel(section)}.${field}`);
+      }
+      if (isCompletionPacketType(type) && isBlockedOrUnresolvedStatus(status)) {
+        const missing = missingBlockedMetacognitiveFields(section, type);
+        for (const field of missing) invalidMetacognitivePackets.push(`${packetLabel(section)}.${field}`);
+      }
+    }
   }
 
-  if (invalidPackets.length === 0) {
+  if (invalidPackets.length === 0 && invalidMetacognitivePackets.length === 0) {
     return { results: [["ok", `runner packets valid (${checked} checked)`]], fatal: false };
   }
-  return { results: [["warn", `missing or empty runner packet fields: ${invalidPackets.join(", ")}`]], fatal: true };
+  const results = [];
+  if (invalidPackets.length) results.push(["warn", `missing or empty runner packet fields: ${invalidPackets.join(", ")}`]);
+  if (invalidMetacognitivePackets.length) {
+    results.push(["warn", `missing or incomplete metacognitive runner packet fields: ${invalidMetacognitivePackets.join(", ")}`]);
+  }
+  return { results, fatal: true };
+}
+
+function classifyMetacognitiveGate(parts) {
+  const text = Object.values(parts || {})
+    .filter((value) => value !== undefined && value !== null)
+    .map((value) => String(value))
+    .join("\n");
+  const triggers = [];
+  for (const [label, pattern] of METACOGNITIVE_TRIGGER_PATTERNS) {
+    if (pattern.test(text)) triggers.push(label);
+  }
+  return {
+    required: triggers.length > 0,
+    triggers: [...new Set(triggers)],
+  };
+}
+
+function mergeMetacognitiveGates(...gates) {
+  const triggers = [];
+  for (const gate of gates) {
+    if (!gate) continue;
+    if (gate.required) triggers.push(...(gate.triggers || []));
+  }
+  return {
+    required: triggers.length > 0,
+    triggers: [...new Set(triggers)],
+  };
+}
+
+function readWorkflowMetacognitiveContext(stateDir) {
+  const taskPath = path.join(stateDir, "task.md");
+  if (!existsSync(taskPath)) return { required: false, triggers: [], taskId: null };
+  const text = readFileSync(taskPath, "utf8");
+  const taskId = getFieldValue(text, "task_id");
+  const epoch = getFieldValue(text, "epoch");
+  const scope = getFieldValue(text, "scope");
+  const task = getFieldValue(text, "task");
+  const declaredRequired = getFieldValue(text, "metacognitive_gate_required") === "true";
+  const declaredTriggers = splitList(getFieldValue(text, "metacognitive_gate_triggers")).filter((item) => item !== "none");
+  const classified = classifyMetacognitiveGate({ task, scope });
+  const gate = mergeMetacognitiveGates(
+    classified,
+    declaredRequired ? { required: true, triggers: declaredTriggers.length ? declaredTriggers : ["declared"] } : null,
+  );
+  return {
+    ...gate,
+    taskId,
+    epoch,
+    scope,
+    task,
+  };
+}
+
+function resolvePacketMetacognitiveGate(commandContext, packet) {
+  const state = resolveWorkflowState(commandContext.targetCwd);
+  const workflowGate = readWorkflowMetacognitiveContext(state.stateDir);
+  const packetGate = classifyMetacognitiveGate({
+    scope: packet.scope,
+    assignment: packet.assignment,
+    expectedOutput: packet.expectedOutput,
+    findings: packet.findings,
+    verification: packet.verification,
+    blockers: packet.blockers,
+    next: packet.next,
+  });
+  const currentTaskGate =
+    workflowGate.required && (!workflowGate.taskId || !packet.taskId || workflowGate.taskId === packet.taskId)
+      ? workflowGate
+      : null;
+  return mergeMetacognitiveGates(currentTaskGate, packetGate);
+}
+
+function assertWorkflowMetacognitiveGateReady(commandContext, taskId, gate) {
+  const state = resolveWorkflowState(commandContext.targetCwd);
+  const stateDir = state.stateDir;
+  if (!existsSync(stateDir)) {
+    throw new CliError(
+      `${METACOGNITIVE_GATE_NAME} required (${formatTriggers(gate)}) but workflow state is missing: run intake for the target before assigning or collecting gate-required work`,
+      1,
+    );
+  }
+  const taskPath = path.join(stateDir, "task.md");
+  const assignmentPath = path.join(stateDir, "assignments.md");
+  const missing = [];
+  if (!existsSync(taskPath)) missing.push("task.md");
+  else {
+    const taskText = readFileSync(taskPath, "utf8");
+    const taskGate = validateMetacognitiveGateText(taskText);
+    if (!taskGate.valid) missing.push(`task.md:${taskGate.missing.join("+")}`);
+    const stateTaskId = getFieldValue(taskText, "task_id");
+    if (stateTaskId && taskId && stateTaskId !== taskId) missing.push(`task.md:current task_id is ${stateTaskId}, not ${taskId}`);
+  }
+  if (!existsSync(assignmentPath)) missing.push("assignments.md");
+  else {
+    const assignmentGate = validateMetacognitiveGateText(readFileSync(assignmentPath, "utf8"));
+    if (!assignmentGate.valid) missing.push(`assignments.md:${assignmentGate.missing.join("+")}`);
+  }
+  if (missing.length) {
+    throw new CliError(
+      `${METACOGNITIVE_GATE_NAME} required (${formatTriggers(gate)}) but current workflow state lacks the machine-enforced gate: ${missing.join(", ")}`,
+      1,
+    );
+  }
+}
+
+function validateIntegrationMetacognitivePacket(commandContext, packet) {
+  if (!packet.metacognitiveGate.required) return;
+  assertWorkflowMetacognitiveGateReady(commandContext, packet.taskId, packet.metacognitiveGate);
+  const status = packet.status.toLowerCase();
+  if (status === "completed") {
+    const missing = missingCompletedMetacognitiveFields(packet.metacognitiveFields);
+    if (!isMetacognitiveFieldEvidenceLike("verification", packet.verification)) missing.push("verification");
+    if (missing.length) {
+      throw new CliError(
+        `collect --status completed rejected: ${METACOGNITIVE_GATE_NAME} fields missing or incomplete: ${missing.join(", ")}`,
+        1,
+      );
+    }
+    return;
+  }
+  if (status === "blocked" || status === "unresolved") {
+    const missing = [];
+    if (!packet.blockers || isMetacognitiveNoEvidenceValue(packet.blockers)) missing.push("blockers");
+    if (!packet.metacognitiveFields.next_investigation || isMetacognitiveNoEvidenceValue(packet.metacognitiveFields.next_investigation)) {
+      missing.push("next_investigation");
+    }
+    if (missing.length) {
+      throw new CliError(
+        `collect --status ${packet.status} for gate-required work must record blocker and next investigation: ${missing.join(", ")}`,
+        1,
+      );
+    }
+  }
+}
+
+function readMetacognitiveArgs(args) {
+  const fields = {};
+  for (const field of METACOGNITIVE_GATE_FIELDS) {
+    const key = toCamel(field.replaceAll("_", "-"));
+    if (args[key] !== undefined) fields[field] = singleLine(args[key]);
+  }
+  return fields;
+}
+
+function validateMetacognitiveGateText(text) {
+  const missing = [];
+  if (getFieldValue(text, "metacognitive_gate_required") !== "true") missing.push("metacognitive_gate_required");
+  const fieldList = splitList(getFieldValue(text, "metacognitive_gate_fields"));
+  if (!fieldList.length) missing.push("metacognitive_gate_fields");
+  else {
+    for (const field of METACOGNITIVE_GATE_FIELDS) {
+      if (!fieldList.includes(field)) missing.push(`metacognitive_gate_fields.${field}`);
+    }
+  }
+  return { valid: missing.length === 0, missing };
+}
+
+function runnerPacketMetacognitiveRequired(section, workflowGate) {
+  const markerGate = getFieldValue(section, "metacognitive_gate_required") === "true"
+    ? { required: true, triggers: splitList(getFieldValue(section, "metacognitive_gate_triggers")).filter((item) => item !== "none") }
+    : null;
+  const packetGate = classifyMetacognitiveGate({
+    scope: getFieldValue(section, "scope"),
+    assignment: getFieldValue(section, "assignment"),
+    expectedOutput: getFieldValue(section, "expected_output"),
+    summary: getFieldValue(section, "summary"),
+    failure: getFieldValue(section, "failure"),
+  });
+  const currentTaskGate =
+    workflowGate.required && (!workflowGate.taskId || getFieldValue(section, "task_id") === workflowGate.taskId)
+      ? workflowGate
+      : null;
+  return mergeMetacognitiveGates(markerGate, packetGate, currentTaskGate);
+}
+
+function isCompletionPacketType(type) {
+  return type === "parent-integration" || type === "process-runner-result";
+}
+
+function isBlockedOrUnresolvedStatus(status) {
+  return status === "blocked" || status === "unresolved";
+}
+
+function missingBlockedMetacognitiveFields(section, type) {
+  const missing = [];
+  const blockerField = type === "process-runner-result" ? "failure" : "blockers";
+  const blocker = getFieldValue(section, blockerField);
+  if (!blocker || isMetacognitiveNoEvidenceValue(blocker)) missing.push(blockerField);
+  const fields = readMetacognitiveFieldsFromSection(section);
+  if (!fields.next_investigation || isMetacognitiveNoEvidenceValue(fields.next_investigation)) {
+    missing.push("next_investigation");
+  }
+  return missing;
+}
+
+function missingCompletedMetacognitiveFields(fields) {
+  return METACOGNITIVE_GATE_FIELDS.filter((field) => !isMetacognitiveFieldEvidenceLike(field, fields[field]));
+}
+
+function isMetacognitiveNoEvidenceValue(value) {
+  const normalized = normalizeEvidenceValue(value);
+  if (!normalized) return true;
+  return /^(?:required before completed collection|missing from runner result|not completed|not provided|done|checked|ok|okay|yes|yep|fixed|handled|reviewed|completed|complete|same|unchanged|none|no|n\/a|na|not applicable|unknown|not run|not checked|not verified|unverified|todo|tbd|placeholder|see above|as above|ditto|empty)$/i.test(normalized);
+}
+
+function isMetacognitiveFieldEvidenceLike(field, value) {
+  const raw = String(value || "").trim();
+  const normalized = normalizeEvidenceValue(raw);
+  if (isMetacognitiveNoEvidenceValue(normalized)) return false;
+  if (isGenericSelfReportOnly(normalized)) return false;
+
+  if (METACOGNITIVE_BOUNDARY_FIELDS.has(field)) {
+    return hasBoundaryEvidence(raw);
+  }
+
+  if (METACOGNITIVE_VERIFICATION_FIELDS.has(field)) {
+    return hasVerificationEvidence(raw);
+  }
+
+  if (METACOGNITIVE_CONTEXT_FIELDS.has(field)) {
+    return hasContextEvidence(raw);
+  }
+
+  if (field === "root_cause" || field === "fix_summary") {
+    return hasConcreteEvidenceMarker(raw) && countEvidenceWords(raw) >= 5;
+  }
+
+  if (field === "reproduction_or_evidence") {
+    return hasVerificationEvidence(raw) || hasConcreteEvidenceMarker(raw);
+  }
+
+  if (field === "skipped_checks" || field === "unresolved_risks" || field === "next_investigation") {
+    return hasConcreteEvidenceMarker(raw) || countEvidenceWords(raw) >= 7;
+  }
+
+  return hasConcreteEvidenceMarker(raw) || countEvidenceWords(raw) >= 6;
+}
+
+function normalizeEvidenceValue(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^[`"'\s]+|[`"'\s]+$/g, "")
+    .replace(/[.!。]+$/g, "")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function countEvidenceWords(value) {
+  const matches = String(value || "").match(/[A-Za-z0-9_.:/-]+|[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]+/gu);
+  return matches ? matches.length : 0;
+}
+
+function isGenericSelfReportOnly(normalized) {
+  return /^(?:i|we|the worker|worker|reviewer|tester)?\s*(?:checked|reviewed|verified|fixed|handled|completed|looked at|confirmed)(?:\s+(?:it|this|that|the work|the code|the fix|everything|carefully|successfully|again))*$/i.test(normalized);
+}
+
+function hasBoundaryEvidence(value) {
+  const text = String(value || "");
+  return hasPathEvidence(text)
+    || (
+      countEvidenceWords(text) >= 3
+      && /\b(?:source(?:[-\s]of[-\s]truth)?|generated|cache|runtime|cli|command|test|tests|docs|documentation|plugin|activation|marketplace|workflow|state|runner|artifact|manifest|repository|repo|git)\b/i.test(text)
+    );
+}
+
+function hasVerificationEvidence(value) {
+  const text = String(value || "");
+  return hasPathEvidence(text)
+    || /--[a-z0-9-]+/i.test(text)
+    || /\bnode:test\b/i.test(text)
+    || (
+      countEvidenceWords(text) >= 2
+      && /\b(?:node|npm|pnpm|yarn|deno|cargo|git|codex|doctor|verify-assignments|normalize-debugging-integrity|collect|assign|run|orchestrate|intake|test|tests|check|probe|smoke|command|stdout|stderr|exit(?:[_\s-]?code)?|status|passed|failed|result|evidence|log|manual)\b/i.test(text)
+    );
+}
+
+function hasContextEvidence(value) {
+  const text = String(value || "");
+  return countEvidenceWords(text) >= 6
+    && /\b(?:before|after|changed?|checked|verified|now|must|could|would|share|shares|affects?|impacts?|consequence|regression|prevents?|requires?|records?|carries?|rejects?|passes?|fails?)\b/i.test(text);
+}
+
+function hasConcreteEvidenceMarker(value) {
+  const text = String(value || "");
+  return hasPathEvidence(text)
+    || hasVerificationEvidence(text)
+    || /\b(?:gate|packet|field|fields|schema|workflow|state|runner|assignment|handoff|collect|intake|doctor|verify-assignments|normalize|metacognitive|debugging|source|plugin|cache|runtime|generated|artifact|repository|repo|git|temp)\b/i.test(text);
+}
+
+function hasPathEvidence(value) {
+  return /(?:^|\s)(?:[.~]?\/|[A-Za-z0-9_.-]+\/[A-Za-z0-9_.\/-]+|\.coding-agents\b|docs\/codex\b|bin\/|tests?\/|src\/|\.mjs\b|\.md\b|\.json\b)/i.test(String(value || ""));
+}
+
+function readMetacognitiveFieldsFromSection(section) {
+  const fields = {};
+  for (const field of METACOGNITIVE_GATE_FIELDS) {
+    const value = getFieldValue(section, field);
+    if (value) fields[field] = value;
+  }
+  return fields;
+}
+
+function extractMetacognitiveFields(text) {
+  const fields = {};
+  for (const field of METACOGNITIVE_GATE_FIELDS) {
+    const pattern = new RegExp(`(?:^|\\n)\\s*(?:[-*]\\s*)?${escapeRegExp(field)}:\\s*(.+)`, "i");
+    const match = pattern.exec(text || "");
+    if (match) fields[field] = singleLine(match[1]);
+  }
+  return fields;
+}
+
+function renderMetacognitiveGateState(gate) {
+  const normalized = gate || { required: false, triggers: [] };
+  return `- metacognitive_gate_required: ${normalized.required}
+- metacognitive_gate_name: ${METACOGNITIVE_GATE_NAME}
+- metacognitive_gate_triggers: ${formatTriggers(normalized)}
+- metacognitive_gate_fields: ${METACOGNITIVE_GATE_FIELDS.join(", ")}
+- metacognitive_gate_contract: ${METACOGNITIVE_GATE_CONTRACT}`;
+}
+
+function renderMetacognitiveGatePacketSchema(gate) {
+  if (!gate?.required) return "";
+  const lines = [
+    `- metacognitive_gate_required: true`,
+    `- metacognitive_gate_name: ${METACOGNITIVE_GATE_NAME}`,
+    `- metacognitive_gate_triggers: ${formatTriggers(gate)}`,
+    `- metacognitive_gate_fields: ${METACOGNITIVE_GATE_FIELDS.join(", ")}`,
+    `- metacognitive_gate_contract: ${METACOGNITIVE_GATE_CONTRACT}`,
+    `- metacognitive_gate_completion_prompt: ${METACOGNITIVE_GATE_COMPLETION_PROMPT}`,
+  ];
+  return lines.join("\n");
+}
+
+function renderMetacognitiveResultFields(gate, placeholder, values = {}, options = {}) {
+  if (!gate?.required) return "";
+  const includeAll = Boolean(options.includeAll);
+  const lines = [];
+  for (const field of METACOGNITIVE_GATE_FIELDS) {
+    if (values[field]) lines.push(`- ${field}: ${values[field]}`);
+    else if (includeAll) lines.push(`- ${field}: ${placeholder}`);
+  }
+  return lines.join("\n");
+}
+
+function renderRunnerPromptMetacognitiveGate(packet) {
+  if (!packet.metacognitiveGate?.required) return "";
+  return `
+${METACOGNITIVE_GATE_NAME}:
+- metacognitive_gate_required: true
+- metacognitive_gate_triggers: ${formatTriggers(packet.metacognitiveGate)}
+- ${METACOGNITIVE_GATE_CONTRACT}
+- A completed result must fill every field listed in the return sections below. Blocked or unresolved work must name the blocker and next_investigation.`;
+}
+
+function renderMetacognitiveReturnSections(packet) {
+  if (!packet.metacognitiveGate?.required) return "";
+  return METACOGNITIVE_GATE_FIELDS.map((field) => `- ${field}:`).join("\n");
+}
+
+function formatTriggers(gate) {
+  return gate?.triggers?.length ? gate.triggers.join(", ") : "none";
+}
+
+function splitList(value) {
+  if (!value) return [];
+  return String(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function packetLabel(section) {
+  return section.split("\n")[0].replace(/^### /, "");
 }
 
 function renderRunnerLifecycle(result) {
@@ -1037,28 +1707,14 @@ function renderRunnerLifecycle(result) {
 
 function upsertGenerated(filePath, body) {
   const block = `${START}\n${GENERATED_HEADING}\n\n${body.trim()}\n${END}\n`;
-  if (!existsSync(filePath)) {
-    writeFileSync(filePath, block, "utf8");
-    return;
-  }
+  writeFileSync(filePath, block, "utf8");
+}
 
-  const current = readFileSync(filePath, "utf8");
-  if (current.startsWith(GENERATED_HEADING)) {
-    writeFileSync(filePath, block, "utf8");
-    return;
-  }
-
-  const startIndex = current.indexOf(START);
-  const endIndex = current.indexOf(END);
-  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-    const before = current.slice(0, startIndex).trimEnd();
-    const after = current.slice(endIndex + END.length).trimStart();
-    const next = [before, block.trimEnd(), after].filter(Boolean).join("\n\n");
-    writeFileSync(filePath, `${next}\n`, "utf8");
-    return;
-  }
-
-  writeFileSync(filePath, `${current.trimEnd()}\n\n${block}`, "utf8");
+function stripGeneratedWorkflowSurroundings(text) {
+  const startIndex = text.indexOf(START);
+  const endIndex = text.indexOf(END);
+  if (startIndex === -1 || endIndex === -1 || endIndex < startIndex) return text;
+  return `${text.slice(startIndex, endIndex + END.length).trimEnd()}\n`;
 }
 
 function resolveWorkflowState(cwd) {
@@ -1184,7 +1840,7 @@ function printLegacyHints(state) {
 
 function resolveCommandContext(args) {
   const invocationCwd = args.cwd ? requireDirectory(args.cwd, "--cwd") : requireDirectory(process.cwd(), "process cwd");
-  const targetCwd = args.targetCwd ? requireDirectory(args.targetCwd, "--target-cwd") : requireDirectory(args.cwd, "--cwd");
+  const targetCwd = args.targetCwd ? requireDirectory(args.targetCwd, "--target-cwd") : invocationCwd;
   return {
     invocationCwd,
     targetCwd,
@@ -1236,7 +1892,7 @@ function printHelp() {
 Usage:
   node bin/coding-agents.mjs intake [--cwd <path>] [--target-cwd <path>] --task <text> --task-id <id> --epoch <epoch> --scope <scope>
   node bin/coding-agents.mjs assign [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> --assignment <text> --expected-output <text>
-  node bin/coding-agents.mjs collect [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> --status <status> [--findings <text>] [--changed-files <text>] [--verification <text>] [--blockers <text>] [--assumptions <text>] [--next <text>]
+  node bin/coding-agents.mjs collect [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> --status <status> [--findings <text>] [--changed-files <text>] [--verification <text>] [--blockers <text>] [--assumptions <text>] [--next <text>] [--expected-outcome <text>] [--actual-result <text>] [--reproduction-or-evidence <text>] [--failure-point <text>] [--hypothesis-branches <text>] [--source-of-truth-boundary <text>] [--plugin-contract-boundary <text>] [--generated-artifact-boundary <text>] [--before-context-effects <text>] [--after-context-effects <text>] [--cross-feature-consequences <text>] [--root-cause <text>] [--fix-summary <text>] [--verification-evidence <text>] [--skipped-checks <text>] [--unresolved-risks <text>] [--next-investigation <text>]
   node bin/coding-agents.mjs run|orchestrate [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> --assignment <text> --expected-output <text> [--runner codex-cli] [--timeout-ms <ms>]
   node bin/coding-agents.mjs verify-assignments [--cwd <path>] [--target-cwd <path>]
   node bin/coding-agents.mjs normalize-debugging-integrity [--cwd <path>] [--target-cwd <path>] [--execute]
@@ -1253,14 +1909,14 @@ Commands:
   verify-assignments
            Block missing or empty task_id, epoch, scope, lifecycle, or debugging_integrity fields in assignments and runner packets.
   normalize-debugging-integrity
-           Dry-run by default. With --execute, add the debugging integrity gate to existing .coding-agents files and runner packets.
+           Dry-run by default. With --execute, add debugging integrity and metacognitive gate schema to existing .coding-agents files and supersede pre-gate completion claims that lack required result fields.
   handoff  Print target .coding-agents/handoff.md.
   doctor   Check required workflow files, role assignments, isolation keys, and Git state.
 
 State:
   The workflow state directory is <git-root>/.coding-agents.
   Commands that read or write workflow state resolve state from the target/jobsite cwd and fail when no target Git root is available.
-  Provide either --cwd <path> or --target-cwd <path>; when both are omitted, process cwd is the invocation cwd only and no target/jobsite cwd is available.
+  When both --cwd and --target-cwd are omitted, process cwd is both invocation cwd and target/jobsite cwd.
   Without --target-cwd, --cwd remains the target/jobsite cwd for backwards compatibility.
   With --target-cwd, --cwd records the invocation cwd (or process cwd when omitted) while state and runner execution use --target-cwd.
   Existing docs/codex directories are migration input or hints only; they are never operational state fallback or write targets.
@@ -1268,6 +1924,7 @@ State:
   Generated assignments, handoff prompts, and runner packets carry lifecycle closure and debugging integrity rules.
   Parent-managed child-worker prompts also suppress nested Coding Agents preflight; child workers do not ask \`coding-agents を使いますか？ [Y/n]\` or start nested Coding Agents workflows inside an assigned task_id/epoch/scope.
   Debug or repair work must identify root cause and verify the intended outcome; log-only, fallback-only, skip-only, failure-output-only, or return-to-main-loop-only changes are not completion.
+  Gate-required debug/repair/source-of-truth/plugin-contract/generated-artifact inconsistency work also carries ${METACOGNITIVE_GATE_NAME} fields and rejects completed collection without them.
 `);
 }
 
