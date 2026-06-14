@@ -21,7 +21,7 @@ const DEBUG_INTEGRITY =
   "For debug or repair work, identify root cause and make the intended outcome succeed; log-only, fallback-only, skip-only, failure-output-only, or return-to-main-loop-only changes are not completion.";
 const METACOGNITIVE_GATE_NAME = "Meta-Cognitive Debug/Repair Gate";
 const METACOGNITIVE_GATE_CONTRACT =
-  "For gate-required debug/repair/SOT/plugin-contract/generated-artifact inconsistency work, explicitly capture before/after context effects, cross-feature consequences, root cause, fix, verification evidence, skipped checks, unresolved risks, and next investigation.";
+  "For gate-required source-change/debug/repair/SOT/plugin-contract/generated-artifact inconsistency work, explicitly capture before/after context effects, cross-feature consequences, root cause, fix, verification evidence, skipped checks, unresolved risks, and next investigation.";
 const METACOGNITIVE_GATE_COMPLETION_PROMPT =
   "Assignment and skeleton packets expose this schema only; completed parent-integration or process-runner-result packets must fill every listed field with actual evidence.";
 const METACOGNITIVE_PRE_GATE_BLOCKER =
@@ -52,6 +52,7 @@ const METACOGNITIVE_GATE_FIELDS = [
 ];
 
 const METACOGNITIVE_TRIGGER_PATTERNS = [
+  ["source change", /\b(?:source[-\s]?change|source[-\s]?edit|source[-\s]?modification|source[-\s]?patch|code[-\s]?change|code[-\s]?edit|code[-\s]?modification|implementation[-\s]?change|implementation[-\s]?edit|config(?:uration)?[-\s]?(?:change|edit|update)|test[-\s]?(?:change|edit|update)|refactor(?:ing)?|canonical[-\s]?(?:doc|document|file)[-\s]?(?:change|edit|update)|source[-\s]change[-\s]metacognitive[-\s]baseline)\b|(?:ソース|コード|実装|設定|テスト|正本)(?:修正|変更|更新|編集)|リファクタ/i],
   ["debug", /\bdebug(?:ging)?\b/i],
   ["repair", /\brepair\b/i],
   ["bug fix", /\bbug[-\s]?fix(?:es)?\b|\bfix(?:ing)?\s+(?:a\s+)?bug\b/i],
@@ -1924,7 +1925,7 @@ State:
   Generated assignments, handoff prompts, and runner packets carry lifecycle closure and debugging integrity rules.
   Parent-managed child-worker prompts also suppress nested Coding Agents preflight; child workers do not ask \`coding-agents を使いますか？ [Y/n]\` or start nested Coding Agents workflows inside an assigned task_id/epoch/scope.
   Debug or repair work must identify root cause and verify the intended outcome; log-only, fallback-only, skip-only, failure-output-only, or return-to-main-loop-only changes are not completion.
-  Gate-required debug/repair/source-of-truth/plugin-contract/generated-artifact inconsistency work also carries ${METACOGNITIVE_GATE_NAME} fields and rejects completed collection without them.
+  Gate-required source-change/debug/repair/source-of-truth/plugin-contract/generated-artifact inconsistency work also carries ${METACOGNITIVE_GATE_NAME} fields and rejects completed collection without them.
 `);
 }
 

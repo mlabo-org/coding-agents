@@ -307,6 +307,84 @@ test("cache/runtime versus source mismatch triggers the metacognitive gate", () 
   }
 });
 
+test("source-change work triggers the metacognitive gate", () => {
+  const repo = makeTempGitRepo();
+  try {
+    const intake = runCli([
+      "intake",
+      "--target-cwd",
+      repo,
+      "--task",
+      "Implement source change in bin/coding-agents.mjs and update tests",
+      "--task-id",
+      "meta-source-change",
+      "--epoch",
+      "e1",
+      "--scope",
+      "source-change metacognitive baseline in bin/coding-agents.mjs",
+    ]);
+
+    assert.equal(intake.status, 0, intake.stderr);
+    assert.match(intake.stdout, /ok metacognitive_gate_required: true/);
+    assert.match(intake.stdout, /source change/);
+    assert.match(readState(repo, "task.md"), /metacognitive_gate_triggers: .*source change/);
+
+    const rejected = runCli([
+      "collect",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "meta-source-change",
+      "--epoch",
+      "e1",
+      "--scope",
+      "bin/coding-agents.mjs",
+      "--status",
+      "completed",
+      "--findings",
+      "patched source",
+      "--changed-files",
+      "bin/coding-agents.mjs",
+      "--verification",
+      "not run",
+    ]);
+
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stderr, /collect --status completed rejected/);
+    assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("Japanese source edit wording triggers the metacognitive gate", () => {
+  const repo = makeTempGitRepo();
+  try {
+    const intake = runCli([
+      "intake",
+      "--target-cwd",
+      repo,
+      "--task",
+      "ソース修正依頼なのでパッチファーストを避けて実装変更する",
+      "--task-id",
+      "meta-japanese-source-change",
+      "--epoch",
+      "e1",
+      "--scope",
+      "コード修正: bin/coding-agents.mjs",
+    ]);
+
+    assert.equal(intake.status, 0, intake.stderr);
+    assert.match(intake.stdout, /ok metacognitive_gate_required: true/);
+    assert.match(intake.stdout, /source change/);
+    assert.match(readState(repo, "task.md"), /metacognitive_gate_triggers: .*source change/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("assign and run skeletons carry the metacognitive gate for gate-required work", () => {
   const repo = makeTempGitRepo();
   try {
