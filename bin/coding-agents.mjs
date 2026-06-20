@@ -262,11 +262,11 @@ function run(args) {
   const commandContext = resolveCommandContext(args);
   const packet = requireAssignmentPacket(args, commandContext);
   assertValidIntakeForPacket(commandContext, packet, args.command || "run");
-  if (args.runner) assertMachineRunnableScope(packet, commandContext.targetCwd);
-  appendRunnerEntry(commandContext, "Issued Assignments", renderAssignmentPacket(packet));
 
   if (args.runner) {
-    const result = runWithRunner(commandContext, packet, args);
+    const runnerOptions = prepareRunnerExecution(commandContext, packet, args);
+    appendRunnerEntry(commandContext, "Issued Assignments", renderAssignmentPacket(packet));
+    const result = runWithRunner(commandContext, packet, runnerOptions);
     appendRunnerEntry(commandContext, "Process Runner Results", renderRunnerResult(result));
     console.log(`ok runner: ${result.runner}`);
     console.log(`ok spawned: ${result.spawned}`);
@@ -279,22 +279,33 @@ function run(args) {
     return;
   }
 
+  appendRunnerEntry(commandContext, "Issued Assignments", renderAssignmentPacket(packet));
   appendRunnerEntry(commandContext, "Process Orchestration Skeletons", renderOrchestrationSkeleton(packet));
   console.log(`ok run skeleton: ${packet.role}`);
   console.log("ok spawned: false");
   console.log("ok note: real process orchestration is deferred; runner recorded the scoped assignment and skeleton only");
 }
 
-function runWithRunner(commandContext, packet, args) {
+function prepareRunnerExecution(commandContext, packet, args) {
   const runner = singleLine(args.runner);
   if (runner !== "codex-cli") {
     throw new CliError(`unknown runner: ${runner}; expected codex-cli`, 1);
   }
-  return runCodexCli(commandContext, packet, args);
+  const timeoutMs = parsePositiveInt(args.timeoutMs || DEFAULT_RUNNER_TIMEOUT_MS, "--timeout-ms");
+  const scopePrefixes = assertMachineRunnableScope(packet, commandContext.targetCwd);
+  assertNoDirtyPathsOutsideMachineScope(commandContext.targetCwd, packet.scope, scopePrefixes);
+  return { runner, timeoutMs, scopePrefixes };
 }
 
-function runCodexCli(commandContext, packet, args) {
-  const timeoutMs = parsePositiveInt(args.timeoutMs || DEFAULT_RUNNER_TIMEOUT_MS, "--timeout-ms");
+function runWithRunner(commandContext, packet, options) {
+  if (options.runner === "codex-cli") {
+    return runCodexCli(commandContext, packet, options);
+  }
+  throw new CliError(`unknown runner: ${options.runner}; expected codex-cli`, 1);
+}
+
+function runCodexCli(commandContext, packet, options) {
+  const { timeoutMs, scopePrefixes } = options;
   const tempDir = mkdtempSync(path.join(os.tmpdir(), "coding-agents-runner-"));
   const outputPath = path.join(tempDir, "last-message.md");
   const prompt = renderRunnerPrompt(packet);
@@ -329,7 +340,7 @@ function runCodexCli(commandContext, packet, args) {
       outputPath,
       result,
     });
-    return applyScopeGuard(normalized, packet, cwd, beforePaths);
+    return applyScopeGuard(normalized, packet, cwd, beforePaths, scopePrefixes);
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
@@ -1148,6 +1159,12 @@ function assertNormalizableWorkflowIdentity(stateDir) {
 }
 
 function assertMachineRunnableScope(packet, cwd) {
+  if (hasNegativeScopeWording(packet.scope)) {
+    throw new CliError(
+      `run --runner codex-cli requires an affirmative machine-checkable path scope; negative or exclusion wording is not supported: ${packet.scope}`,
+      1,
+    );
+  }
   const prefixes = parseMachineScopePrefixes(packet.scope, cwd);
   if (!prefixes) {
     throw new CliError(
@@ -1155,10 +1172,23 @@ function assertMachineRunnableScope(packet, cwd) {
       1,
     );
   }
+  return prefixes;
 }
 
-function applyScopeGuard(result, packet, cwd, beforePaths) {
-  const prefixes = parseMachineScopePrefixes(packet.scope, cwd);
+function assertNoDirtyPathsOutsideMachineScope(cwd, scope, prefixes) {
+  if (prefixes.includes(".")) return;
+  const dirtyOutsideScope = readGitChangedPaths(cwd)
+    .filter((changedPath) => !isPathAllowedByScope(changedPath, prefixes));
+  if (dirtyOutsideScope.length) {
+    throw new CliError(
+      `run --runner codex-cli refuses to launch with dirty files outside scope ${scope}: ${dirtyOutsideScope.join(", ")}`,
+      1,
+    );
+  }
+}
+
+function applyScopeGuard(result, packet, cwd, beforePaths, scopePrefixes = null) {
+  const prefixes = scopePrefixes || parseMachineScopePrefixes(packet.scope, cwd);
   if (!prefixes) {
     return {
       ...result,
@@ -1178,6 +1208,11 @@ function applyScopeGuard(result, packet, cwd, beforePaths) {
     status: "failed",
     failure: `runner changed files outside scope ${packet.scope}: ${outsideScope.join(", ")}`,
   };
+}
+
+function hasNegativeScopeWording(scope) {
+  return /\b(?:do\s+not|don't|must\s+not|never|except|exclude(?:s|d|ing)?|excluding|forbid(?:s)?|forbidden|outside\s+(?:the\s+)?scope|outside\s+of|not\s+(?:edit|touch|modify|change))\b|禁止|除外|以外|編集しない|変更しない|触らない/i
+    .test(String(scope || ""));
 }
 
 function parseMachineScopePrefixes(scope, cwd) {
@@ -2144,7 +2179,7 @@ function readGitChangedPaths(cwd) {
       .split(/\r?\n/)
       .map((line) => line.trimEnd())
       .filter(Boolean)
-      .map((line) => parsePorcelainPath(line))
+      .flatMap((line) => parsePorcelainPaths(line))
       .filter(Boolean)
       .sort();
   } catch {
@@ -2152,12 +2187,22 @@ function readGitChangedPaths(cwd) {
   }
 }
 
-function parsePorcelainPath(line) {
+function parsePorcelainPaths(line) {
   const body = line.slice(3).trim();
-  if (!body) return null;
+  if (!body) return [];
   const renameMarker = " -> ";
-  const pathPart = body.includes(renameMarker) ? body.slice(body.lastIndexOf(renameMarker) + renameMarker.length) : body;
-  return pathPart.replace(/^"|"$/g, "").replace(/\\/g, "/");
+  if (body.includes(renameMarker)) {
+    const markerIndex = body.lastIndexOf(renameMarker);
+    return [
+      normalizePorcelainPath(body.slice(0, markerIndex)),
+      normalizePorcelainPath(body.slice(markerIndex + renameMarker.length)),
+    ];
+  }
+  return [normalizePorcelainPath(body)];
+}
+
+function normalizePorcelainPath(pathPart) {
+  return pathPart.trim().replace(/^"|"$/g, "").replace(/\\/g, "/");
 }
 
 function summarizeGit(output) {
