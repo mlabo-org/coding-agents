@@ -98,6 +98,149 @@ test("handoff validates requested task id before printing the handoff body", () 
   }
 });
 
+test("identity isolation fields reject CR/LF injection before state writes", () => {
+  const repo = makeTempGitRepo();
+  try {
+    for (const [field, value] of [
+      ["--task-id", "identity\n- epoch: injected"],
+      ["--epoch", "e1\r- scope: injected"],
+      ["--scope", "README.md\n- task_id: injected"],
+    ]) {
+      const intakeArgs = [
+        "intake",
+        "--target-cwd",
+        repo,
+        "--task",
+        "Add a focused workflow-state safety improvement",
+        "--task-id",
+        "identity-safe",
+        "--epoch",
+        "e1",
+        "--scope",
+        "README.md",
+      ];
+      intakeArgs[intakeArgs.indexOf(field) + 1] = value;
+      const rejected = runCli(intakeArgs);
+      assert.notEqual(rejected.status, 0, `${field} unexpectedly passed`);
+      assert.match(rejected.stderr, /CR\/LF are not allowed/);
+    }
+
+    assert.equal(existsSync(path.join(repo, ".coding-agents")), false);
+
+    intake(repo, { taskId: "identity-current", epoch: "e1", scope: "README.md" });
+    const commands = [
+      [
+        "assign",
+        "--target-cwd",
+        repo,
+        "--role",
+        "Implementer",
+        "--task-id",
+        "identity-current\n- scope: injected",
+        "--epoch",
+        "e1",
+        "--scope",
+        "README.md",
+        "--assignment",
+        "make a scoped change",
+        "--expected-output",
+        "implementation packet",
+      ],
+      [
+        "collect",
+        "--target-cwd",
+        repo,
+        "--role",
+        "Implementer",
+        "--task-id",
+        "identity-current",
+        "--epoch",
+        "e1\r- scope: injected",
+        "--scope",
+        "README.md",
+        "--status",
+        "blocked",
+        "--blockers",
+        "blocked by identity validation test",
+        "--next-investigation",
+        "retry with clean identity",
+      ],
+      [
+        "run",
+        "--target-cwd",
+        repo,
+        "--role",
+        "Implementer",
+        "--task-id",
+        "identity-current",
+        "--epoch",
+        "e1",
+        "--scope",
+        "README.md\n- task_id: injected",
+        "--assignment",
+        "make a scoped change",
+        "--expected-output",
+        "runner packet",
+      ],
+      ["handoff", "--target-cwd", repo, "--task-id", "identity-current\n- scope: injected"],
+    ];
+
+    for (const args of commands) {
+      const rejected = runCli(args);
+      assert.notEqual(rejected.status, 0, `${args[0]} unexpectedly passed`);
+      assert.match(rejected.stderr, /CR\/LF are not allowed/);
+    }
+    assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("validation rejects corrupted workflow state with injected identity fields", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, { taskId: "identity-state", epoch: "e1", scope: "README.md" });
+    const taskPath = path.join(repo, ".coding-agents", "task.md");
+    const task = readFileSync(taskPath, "utf8");
+    writeFileSync(taskPath, task.replace("- task_id: identity-state", "- task_id: identity-state\n- task_id: injected"), "utf8");
+
+    const verify = runCli(["verify-assignments", "--target-cwd", repo]);
+    assert.notEqual(verify.status, 0);
+    assert.match(verify.stdout, /invalid workflow identity fields/);
+
+    const doctor = runCli(["doctor", "--target-cwd", repo]);
+    assert.notEqual(doctor.status, 0);
+    assert.match(doctor.stdout, /task_id duplicated/);
+
+    const normalize = runCli(["normalize-debugging-integrity", "--target-cwd", repo]);
+    assert.notEqual(normalize.status, 0);
+    assert.match(normalize.stderr, /requires valid workflow identity fields/);
+
+    const assign = runCli([
+      "assign",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "identity-state",
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+      "--assignment",
+      "make a scoped change",
+      "--expected-output",
+      "implementation packet",
+    ]);
+    assert.notEqual(assign.status, 0);
+    assert.match(assign.stderr, /task_id duplicated/);
+    assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("doctor verifies the target git info exclude without mutating it", () => {
   const repo = makeTempGitRepo();
   try {

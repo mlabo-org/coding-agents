@@ -359,6 +359,63 @@ test("source-change work triggers the metacognitive gate", () => {
   }
 });
 
+test("source, test, and config path scopes trigger the metacognitive gate even with bland task text", () => {
+  const repo = makeTempGitRepo();
+  try {
+    for (const [taskId, scope] of [
+      ["meta-path-source", "bin/coding-agents.mjs"],
+      ["meta-path-test", "tests/workflow-state.test.mjs"],
+      ["meta-path-config", "package.json"],
+    ]) {
+      const intake = runCli([
+        "intake",
+        "--target-cwd",
+        repo,
+        "--task",
+        "Organize the scoped work",
+        "--task-id",
+        taskId,
+        "--epoch",
+        "e1",
+        "--scope",
+        scope,
+      ]);
+
+      assert.equal(intake.status, 0, intake.stderr);
+      assert.match(intake.stdout, /ok metacognitive_gate_required: true/);
+      assert.match(intake.stdout, /source\/test\/config path scope/);
+    }
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("English and Japanese debug and test-failure terms trigger the metacognitive gate", () => {
+  const repo = makeTempGitRepo();
+  try {
+    const intake = runCli([
+      "intake",
+      "--target-cwd",
+      repo,
+      "--task",
+      "Investigate failing tests and test failures: 不具合、期待結果が出ない、原因調査",
+      "--task-id",
+      "meta-debug-terms",
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+    ]);
+
+    assert.equal(intake.status, 0, intake.stderr);
+    assert.match(intake.stdout, /ok metacognitive_gate_required: true/);
+    assert.match(intake.stdout, /test failure/);
+    assert.match(readState(repo, "task.md"), /metacognitive_gate_triggers: .*test failure/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("Japanese source edit wording triggers the metacognitive gate", () => {
   const repo = makeTempGitRepo();
   try {
@@ -380,6 +437,56 @@ test("Japanese source edit wording triggers the metacognitive gate", () => {
     assert.match(intake.stdout, /ok metacognitive_gate_required: true/);
     assert.match(intake.stdout, /source change/);
     assert.match(readState(repo, "task.md"), /metacognitive_gate_triggers: .*source change/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("completion status synonyms cannot bypass gate-required completion validation", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intakeGateRequired(repo, "meta-completion-synonyms");
+
+    for (const status of ["success", "done", "fixed", "passed"]) {
+      const rejected = runCli([
+        "collect",
+        "--target-cwd",
+        repo,
+        "--role",
+        "Implementer",
+        "--task-id",
+        "meta-completion-synonyms",
+        "--epoch",
+        "e1",
+        "--scope",
+        "bin/coding-agents.mjs",
+        "--status",
+        status,
+        "--findings",
+        "fixed",
+        "--changed-files",
+        "bin/coding-agents.mjs",
+        "--verification",
+        "not run",
+      ]);
+
+      assert.notEqual(rejected.status, 0, `${status} unexpectedly passed`);
+      assert.match(rejected.stderr, new RegExp(`collect --status ${status} rejected`));
+      assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
+    }
+
+    writeFileSync(path.join(repo, ".coding-agents", "runner.md"), completionSynonymRunner("meta-completion-synonyms", "success"), "utf8");
+    const verify = runCli(["verify-assignments", "--target-cwd", repo]);
+    assert.notEqual(verify.status, 0);
+    assert.match(verify.stdout, /expected_outcome/);
+
+    const normalized = runCli(["normalize-debugging-integrity", "--target-cwd", repo, "--execute"]);
+    assert.equal(normalized.status, 0, normalized.stderr);
+    assert.match(normalized.stdout, /Updated: runner.md/);
+    const runner = readState(repo, "runner.md");
+    assert.match(runner, /status: unresolved/);
+    assert.match(runner, /pre-metacognitive-gate packet claimed completion/);
+    assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -835,6 +942,38 @@ This file records stale pre-gate packets.
 - assumptions: none
 - next: parent final verification
 - debugging_integrity: debug work requires root cause and verification
+- lifecycle: Parent integrates this packet, records any blocker or follow-up, then closes or retires the subagent unless an explicitly scoped continuation is required.
+`;
+}
+
+function completionSynonymRunner(taskId, status) {
+  return `# Coding Agents Runner
+
+This file records a gate-required packet with a completion synonym.
+
+## Parent Integration Packets
+
+### 2026-06-13T00:01:00.000Z Implementer ${taskId}
+
+- type: parent-integration
+- role: Implementer
+- status: ${status}
+- task_id: ${taskId}
+- epoch: e1
+- scope: bin/coding-agents.mjs
+- findings: older worker claimed completion with a synonym
+- changed_files: bin/coding-agents.mjs
+- verification: not run
+- blockers: none
+- assumptions: none
+- next: parent final verification
+- debugging_integrity: debug work requires root cause and verification
+- metacognitive_gate_required: true
+- metacognitive_gate_name: Meta-Cognitive Debug/Repair Gate
+- metacognitive_gate_triggers: source/test/config path scope
+- metacognitive_gate_fields: ${META_ARGS.filter((_, index) => index % 2 === 0).map((flag) => flag.slice(2).replaceAll("-", "_")).join(", ")}
+- metacognitive_gate_contract: gate-required work needs structured evidence
+- metacognitive_gate_completion_prompt: completed packets must fill every field
 - lifecycle: Parent integrates this packet, records any blocker or follow-up, then closes or retires the subagent unless an explicitly scoped continuation is required.
 `;
 }

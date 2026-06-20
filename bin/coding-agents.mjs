@@ -53,10 +53,10 @@ const METACOGNITIVE_GATE_FIELDS = [
 
 const METACOGNITIVE_TRIGGER_PATTERNS = [
   ["source change", /\b(?:source[-\s]?change|source[-\s]?edit|source[-\s]?modification|source[-\s]?patch|code[-\s]?change|code[-\s]?edit|code[-\s]?modification|implementation[-\s]?change|implementation[-\s]?edit|config(?:uration)?[-\s]?(?:change|edit|update)|test[-\s]?(?:change|edit|update)|refactor(?:ing)?|canonical[-\s]?(?:doc|document|file)[-\s]?(?:change|edit|update)|source[-\s]change[-\s]metacognitive[-\s]baseline)\b|(?:ソース|コード|実装|設定|テスト|正本)(?:修正|変更|更新|編集)|リファクタ/i],
-  ["debug", /\bdebug(?:ging)?\b/i],
-  ["repair", /\brepair\b/i],
+  ["debug", /\bdebug(?:ging)?\b|原因調査/i],
+  ["repair", /\brepair\b|不具合|期待結果が出ない/i],
   ["bug fix", /\bbug[-\s]?fix(?:es)?\b|\bfix(?:ing)?\s+(?:a\s+)?bug\b/i],
-  ["test failure", /\btest\s+fail(?:ure|ing|ed)?\b|\bfailing\s+test\b/i],
+  ["test failure", /\b(?:test\s+fail(?:ure|ures|ing|ed)?|test\s+failures|failing\s+tests?|tests?\s+(?:are\s+)?failing)\b/i],
   ["regression", /\bregression\b/i],
   ["not working", /\bnot\s+working\b|\bdoes(?:\s+not|n't)\s+work\b/i],
   ["expected result not produced", /\bexpected\s+result\s+(?:is\s+)?not\s+produced\b|\bexpected\s+(?:outcome|result).*\bnot\s+(?:produced|returned|generated)\b/i],
@@ -86,6 +86,21 @@ const METACOGNITIVE_CONTEXT_FIELDS = new Set([
 const METACOGNITIVE_VERIFICATION_FIELDS = new Set([
   "verification",
   "verification_evidence",
+]);
+
+const COMPLETION_STATUS_SYNONYMS = new Set([
+  "completed",
+  "complete",
+  "done",
+  "fixed",
+  "passed",
+  "pass",
+  "success",
+  "successful",
+  "succeeded",
+  "resolved",
+  "ok",
+  "okay",
 ]);
 
 const ROLES = [
@@ -172,9 +187,9 @@ function parseArgs(argv) {
 function intake(args) {
   const commandContext = resolveCommandContext(args);
   const task = requireArg(args.task, "--task");
-  const taskId = requireArg(args.taskId, "--task-id");
-  const epoch = requireArg(args.epoch, "--epoch");
-  const scope = requireArg(args.scope, "--scope");
+  const taskId = requireIdentityArg(args.taskId, "--task-id");
+  const epoch = requireIdentityArg(args.epoch, "--epoch");
+  const scope = requireIdentityArg(args.scope, "--scope");
   const metacognitiveGate = classifyMetacognitiveGate({ task, scope });
   const state = resolveWorkflowState(commandContext.targetCwd);
   prepareStateWrite(state);
@@ -211,7 +226,7 @@ function intake(args) {
 
 function handoff(args) {
   const commandContext = resolveCommandContext(args);
-  const taskId = requireArg(args.taskId, "--task-id");
+  const taskId = requireIdentityArg(args.taskId, "--task-id");
   const state = resolveWorkflowState(commandContext.targetCwd);
   assertHandoffTaskMatches(state, taskId);
   printLegacyHints(state);
@@ -429,6 +444,7 @@ function normalizeDebuggingIntegrity(args) {
   if (!existsSync(stateDir)) {
     throw new CliError(`missing workflow state directory: ${stateDir}`, 1);
   }
+  assertNormalizableWorkflowIdentity(stateDir);
   const workflowGate = readWorkflowMetacognitiveContext(stateDir);
 
   const normalizers = {
@@ -514,10 +530,14 @@ function doctor(args) {
 
   const taskPath = path.join(stateDir, "task.md");
   if (existsSync(taskPath)) {
-    const text = readFileSync(taskPath, "utf8");
-    for (const key of ["task_id", "epoch", "scope"]) {
-      if (new RegExp(`${key}:`).test(text)) results.push(["ok", `${key} present in task.md`]);
-      else {
+    const identity = readWorkflowTaskIdentity(stateDir);
+    for (const error of identity.errors) {
+      results.push(["warn", error]);
+      fatal = true;
+    }
+    for (const [key, value] of Object.entries({ task_id: identity.taskId, epoch: identity.epoch, scope: identity.scope })) {
+      if (value) results.push(["ok", `${key} present in task.md`]);
+      else if (!identity.errors.some((error) => error.includes(`task.md:${key}`))) {
         results.push(["warn", `${key} missing from task.md`]);
         fatal = true;
       }
@@ -945,8 +965,8 @@ function normalizeRunnerPacketMetacognitiveGate(section, workflowGate) {
   if (!packetGate.required) return section;
 
   let next = ensureMetacognitiveGateSchemaInSection(section, packetGate);
-  const status = (getFieldValue(next, "status") || "").toLowerCase();
-  if (isCompletionPacketType(type) && status === "completed") {
+  const status = normalizeStatus(getFieldValue(next, "status"));
+  if (isCompletionPacketType(type) && isCompletionStatus(status)) {
     const missing = missingCompletedMetacognitiveFields(readMetacognitiveFieldsFromSection(next));
     if (missing.length) next = markPreGateCompletionUnresolved(next, type);
   }
@@ -1020,9 +1040,9 @@ function requireAssignmentPacket(args, commandContext) {
     timestamp: new Date().toISOString(),
     role: requireRole(args.role),
     status: singleLine(args.status || "assigned"),
-    taskId: requireArg(args.taskId, "--task-id"),
-    epoch: requireArg(args.epoch, "--epoch"),
-    scope: requireArg(args.scope, "--scope"),
+    taskId: requireIdentityArg(args.taskId, "--task-id"),
+    epoch: requireIdentityArg(args.epoch, "--epoch"),
+    scope: requireIdentityArg(args.scope, "--scope"),
     invocationCwd: commandContext.invocationCwd,
     targetCwd: commandContext.targetCwd,
     assignment: singleLine(requireArg(args.assignment, "--assignment")),
@@ -1041,9 +1061,9 @@ function requireIntegrationPacket(args, commandContext) {
     timestamp: new Date().toISOString(),
     role: requireRole(args.role),
     status: singleLine(requireArg(args.status, "--status")),
-    taskId: requireArg(args.taskId, "--task-id"),
-    epoch: requireArg(args.epoch, "--epoch"),
-    scope: requireArg(args.scope, "--scope"),
+    taskId: requireIdentityArg(args.taskId, "--task-id"),
+    epoch: requireIdentityArg(args.epoch, "--epoch"),
+    scope: requireIdentityArg(args.scope, "--scope"),
     invocationCwd: commandContext.invocationCwd,
     targetCwd: commandContext.targetCwd,
     findings: singleLine(args.findings || "none"),
@@ -1063,7 +1083,7 @@ function assertValidIntakeForPacket(commandContext, packet, activity) {
   const state = resolveWorkflowState(commandContext.targetCwd);
   const missing = validateGeneratedIntakeFiles(state.stateDir);
   const identity = readWorkflowTaskIdentity(state.stateDir);
-  const mismatches = [];
+  const mismatches = [...identity.errors];
 
   if (!identity.taskId) mismatches.push("task.md:task_id missing");
   else if (identity.taskId !== packet.taskId) mismatches.push(`task_id ${packet.taskId} does not match current task ${identity.taskId}`);
@@ -1081,8 +1101,10 @@ function assertValidIntakeForPacket(commandContext, packet, activity) {
 function assertHandoffTaskMatches(state, taskId) {
   const missing = validateGeneratedIntakeFiles(state.stateDir).filter((item) => item === "task.md" || item === "handoff.md");
   const identity = readWorkflowTaskIdentity(state.stateDir);
-  if (missing.length || !identity.taskId) {
-    throw new CliError(`handoff requires current intake state before printing handoff: ${[...missing, "task.md:task_id missing"].join(", ")}`, 1);
+  if (missing.length || identity.errors.length || !identity.taskId) {
+    const details = [...missing, ...identity.errors];
+    if (!identity.taskId) details.push("task.md:task_id missing");
+    throw new CliError(`handoff requires current intake state before printing handoff: ${details.join(", ")}`, 1);
   }
   if (identity.taskId !== taskId) {
     throw new CliError(`handoff task_id ${taskId} does not match current task ${identity.taskId}`, 1);
@@ -1100,13 +1122,29 @@ function validateGeneratedIntakeFiles(stateDir) {
 
 function readWorkflowTaskIdentity(stateDir) {
   const taskPath = path.join(stateDir, "task.md");
-  if (!existsSync(taskPath)) return { taskId: null, epoch: null, scope: null };
-  const text = readFileSync(taskPath, "utf8");
+  if (!existsSync(taskPath)) return { taskId: null, epoch: null, scope: null, errors: [] };
+  return readWorkflowTaskIdentityFromText(readFileSync(taskPath, "utf8"), "task.md");
+}
+
+function readWorkflowTaskIdentityFromText(text, label) {
+  const taskId = readIdentityField(text, "task_id", label);
+  const epoch = readIdentityField(text, "epoch", label);
+  const scope = readIdentityField(text, "scope", label);
   return {
-    taskId: getFieldValue(text, "task_id"),
-    epoch: getFieldValue(text, "epoch"),
-    scope: getFieldValue(text, "scope"),
+    taskId: taskId.value,
+    epoch: epoch.value,
+    scope: scope.value,
+    errors: [...taskId.errors, ...epoch.errors, ...scope.errors],
   };
+}
+
+function assertNormalizableWorkflowIdentity(stateDir) {
+  const taskPath = path.join(stateDir, "task.md");
+  if (!existsSync(taskPath)) return;
+  const identity = readWorkflowTaskIdentityFromText(stripGeneratedWorkflowSurroundings(readFileSync(taskPath, "utf8")), "task.md");
+  if (identity.errors.length) {
+    throw new CliError(`normalize-debugging-integrity requires valid workflow identity fields: ${identity.errors.join(", ")}`, 1);
+  }
 }
 
 function assertMachineRunnableScope(packet, cwd) {
@@ -1222,7 +1260,7 @@ function renderIntegrationPacket(packet) {
 - debugging_integrity: ${DEBUG_INTEGRITY}
 ${renderMetacognitiveGatePacketSchema(packet.metacognitiveGate)}
 ${renderMetacognitiveResultFields(packet.metacognitiveGate, "not completed", packet.metacognitiveFields, {
-  includeAll: packet.status.toLowerCase() === "completed",
+  includeAll: isCompletionStatus(packet.status),
 })}
 - lifecycle: Parent integrates this packet, records any blocker or follow-up, then closes or retires the subagent unless an explicitly scoped continuation is required.`;
 }
@@ -1319,9 +1357,15 @@ function validateAssignmentFiles(stateDir) {
   let checkedFiles = 0;
   const assignmentPath = path.join(stateDir, "assignments.md");
   const workflowGate = readWorkflowMetacognitiveContext(stateDir);
+  const identity = readWorkflowTaskIdentity(stateDir);
 
   if (!existsSync(stateDir)) {
     return { results: [["warn", `missing workflow state directory: ${stateDir}`]], fatal: true };
+  }
+
+  if (identity.errors.length) {
+    results.push(["warn", `invalid workflow identity fields: ${identity.errors.join(", ")}`]);
+    fatal = true;
   }
 
   if (existsSync(assignmentPath)) {
@@ -1357,10 +1401,13 @@ function validateRoleAssignments(text, workflowGate = { required: false }) {
 
   for (const role of ROLES) {
     const section = getRoleSection(text, role);
-    for (const field of ["role", "status", "task_id", "epoch", "scope", "assignment", "expected_output", "lifecycle"]) {
+    for (const field of ["role", "status", "assignment", "expected_output", "lifecycle"]) {
       if (!getFieldValue(section, field)) {
         invalidFields.push(`${role}.${field}`);
       }
+    }
+    for (const field of ["task_id", "epoch", "scope"]) {
+      for (const error of validateIdentityField(section, field, role)) invalidFields.push(error);
     }
     if (workflowGate.required) {
       const roleGate = validateMetacognitiveGateText(section);
@@ -1415,8 +1462,13 @@ function validateRunnerPackets(text, workflowGate = { required: false }) {
     if (!["assignment", "parent-integration", "process-orchestration-skeleton", "process-runner-result"].includes(type)) continue;
     checked += 1;
     for (const field of ["role", "task_id", "epoch", "scope"]) {
-      if (!getFieldValue(section, field)) {
+      if (field === "role" && !getFieldValue(section, field)) {
         invalidPackets.push(`${section.split("\n")[0].replace(/^### /, "")}.${field}`);
+      }
+    }
+    for (const field of ["task_id", "epoch", "scope"]) {
+      for (const error of validateIdentityField(section, field, section.split("\n")[0].replace(/^### /, ""))) {
+        invalidPackets.push(error);
       }
     }
     if (type === "assignment" || type === "process-orchestration-skeleton") {
@@ -1448,8 +1500,8 @@ function validateRunnerPackets(text, workflowGate = { required: false }) {
         invalidMetacognitivePackets.push(`${packetLabel(section)}.${gateValidation.missing.join("+")}`);
       }
 
-      const status = (getFieldValue(section, "status") || "").toLowerCase();
-      if (isCompletionPacketType(type) && status === "completed") {
+      const status = normalizeStatus(getFieldValue(section, "status"));
+      if (isCompletionPacketType(type) && isCompletionStatus(status)) {
         const missing = missingCompletedMetacognitiveFields(readMetacognitiveFieldsFromSection(section));
         for (const field of missing) invalidMetacognitivePackets.push(`${packetLabel(section)}.${field}`);
       }
@@ -1480,10 +1532,18 @@ function classifyMetacognitiveGate(parts) {
   for (const [label, pattern] of METACOGNITIVE_TRIGGER_PATTERNS) {
     if (pattern.test(text)) triggers.push(label);
   }
+  if (hasSourceTestConfigPathScope(parts?.scope)) triggers.push("source/test/config path scope");
   return {
     required: triggers.length > 0,
     triggers: [...new Set(triggers)],
   };
+}
+
+function hasSourceTestConfigPathScope(scope) {
+  const text = String(scope || "");
+  return /(?:^|[\s,;])(?:\.?\/)?(?:bin|src|lib|app|apps|packages|server|client|components|pages|routes|tests?|__tests__|spec|scripts|config|configs|\.github\/workflows)\/[^\s,;]+/i.test(text)
+    || /(?:^|[\s,;])(?:package(?:-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|tsconfig(?:\.[^/\s,;]+)?\.json|jsconfig\.json|vite\.config\.[cm]?[jt]s|next\.config\.[cm]?[jt]s|jest\.config\.[cm]?[jt]s|vitest\.config\.[cm]?[jt]s|eslint\.config\.[cm]?[jt]s|\.eslintrc(?:\.[a-z]+)?|\.prettierrc(?:\.[a-z]+)?|Cargo\.toml|Cargo\.lock|go\.mod|go\.sum|pyproject\.toml|requirements(?:-[^/\s,;]+)?\.txt|uv\.lock|deno\.json|wrangler\.toml)(?=$|[\s,;])/i.test(text)
+    || /(?:^|[\s,;])(?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.(?:mjs|cjs|js|jsx|ts|tsx|py|rs|go|rb|java|kt|swift|sh|bash|zsh|json|ya?ml|toml)(?=$|[\s,;])/i.test(text);
 }
 
 function mergeMetacognitiveGates(...gates) {
@@ -1502,9 +1562,10 @@ function readWorkflowMetacognitiveContext(stateDir) {
   const taskPath = path.join(stateDir, "task.md");
   if (!existsSync(taskPath)) return { required: false, triggers: [], taskId: null };
   const text = readFileSync(taskPath, "utf8");
-  const taskId = getFieldValue(text, "task_id");
-  const epoch = getFieldValue(text, "epoch");
-  const scope = getFieldValue(text, "scope");
+  const identity = readWorkflowTaskIdentity(stateDir);
+  const taskId = identity.taskId;
+  const epoch = identity.epoch;
+  const scope = identity.scope;
   const task = getFieldValue(text, "task");
   const declaredRequired = getFieldValue(text, "metacognitive_gate_required") === "true";
   const declaredTriggers = splitList(getFieldValue(text, "metacognitive_gate_triggers")).filter((item) => item !== "none");
@@ -1519,6 +1580,7 @@ function readWorkflowMetacognitiveContext(stateDir) {
     epoch,
     scope,
     task,
+    identityErrors: identity.errors,
   };
 }
 
@@ -1558,7 +1620,9 @@ function assertWorkflowMetacognitiveGateReady(commandContext, taskId, gate) {
     const taskText = readFileSync(taskPath, "utf8");
     const taskGate = validateMetacognitiveGateText(taskText);
     if (!taskGate.valid) missing.push(`task.md:${taskGate.missing.join("+")}`);
-    const stateTaskId = getFieldValue(taskText, "task_id");
+    const identity = readWorkflowTaskIdentity(stateDir);
+    for (const error of identity.errors) missing.push(error);
+    const stateTaskId = identity.taskId;
     if (stateTaskId && taskId && stateTaskId !== taskId) missing.push(`task.md:current task_id is ${stateTaskId}, not ${taskId}`);
   }
   if (!existsSync(assignmentPath)) missing.push("assignments.md");
@@ -1577,13 +1641,13 @@ function assertWorkflowMetacognitiveGateReady(commandContext, taskId, gate) {
 function validateIntegrationMetacognitivePacket(commandContext, packet) {
   if (!packet.metacognitiveGate.required) return;
   assertWorkflowMetacognitiveGateReady(commandContext, packet.taskId, packet.metacognitiveGate);
-  const status = packet.status.toLowerCase();
-  if (status === "completed") {
+  const status = normalizeStatus(packet.status);
+  if (isCompletionStatus(status)) {
     const missing = missingCompletedMetacognitiveFields(packet.metacognitiveFields);
     if (!isMetacognitiveFieldEvidenceLike("verification", packet.verification)) missing.push("verification");
     if (missing.length) {
       throw new CliError(
-        `collect --status completed rejected: ${METACOGNITIVE_GATE_NAME} fields missing or incomplete: ${missing.join(", ")}`,
+        `collect --status ${packet.status} rejected: ${METACOGNITIVE_GATE_NAME} fields missing or incomplete: ${missing.join(", ")}`,
         1,
       );
     }
@@ -1646,6 +1710,14 @@ function runnerPacketMetacognitiveRequired(section, workflowGate) {
 
 function isCompletionPacketType(type) {
   return type === "parent-integration" || type === "process-runner-result";
+}
+
+function normalizeStatus(status) {
+  return singleLine(status || "").toLowerCase();
+}
+
+function isCompletionStatus(status) {
+  return COMPLETION_STATUS_SYNONYMS.has(normalizeStatus(status));
 }
 
 function isBlockedOrUnresolvedStatus(status) {
@@ -2034,6 +2106,14 @@ function requireArg(value, flag) {
   return String(value);
 }
 
+function requireIdentityArg(value, flag) {
+  const text = requireArg(value, flag);
+  if (/[\r\n]/.test(text)) {
+    throw new CliError(`${flag} must be a single line; CR/LF are not allowed`, 1);
+  }
+  return text;
+}
+
 function requireRole(value) {
   const role = singleLine(requireArg(value, "--role"));
   if (!ROLES.includes(role)) {
@@ -2151,10 +2231,40 @@ function getRoleSection(text, role) {
 }
 
 function getFieldValue(section, field) {
-  const match = new RegExp(`^- ${escapeRegExp(field)}:\\s*(.*)$`, "m").exec(section);
-  if (!match) return null;
-  const value = match[1].trim();
+  const value = getFieldValues(section, field)[0];
   return value ? value : null;
+}
+
+function getFieldValues(section, field) {
+  const values = [];
+  const pattern = new RegExp(`^- ${escapeRegExp(field)}:\\s*(.*)$`, "gm");
+  for (const match of String(section || "").matchAll(pattern)) {
+    const value = match[1].trim();
+    if (value) values.push(value);
+  }
+  return values;
+}
+
+function readIdentityField(section, field, label) {
+  const values = getFieldValues(section, field);
+  return {
+    value: values[0] || null,
+    errors: identityFieldErrors(values, field, label, { missing: false }),
+  };
+}
+
+function validateIdentityField(section, field, label) {
+  return identityFieldErrors(getFieldValues(section, field), field, label, { missing: true });
+}
+
+function identityFieldErrors(values, field, label, options = {}) {
+  const errors = [];
+  if (options.missing && values.length === 0) errors.push(`${label}.${field}`);
+  if (values.length > 1) errors.push(`${label}.${field} duplicated`);
+  for (const value of values) {
+    if (/[\r\n]/.test(value)) errors.push(`${label}.${field} contains CR/LF`);
+  }
+  return errors;
 }
 
 function singleLine(value) {
