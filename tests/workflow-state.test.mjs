@@ -696,6 +696,36 @@ test("runner packets without work_type remain backwards compatible", () => {
   }
 });
 
+test("doctor does not treat trailing legacy runner packet identity as modern duplicates", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, { taskId: "legacy-boundary", epoch: "e1", scope: "README.md" });
+    writeFileSync(path.join(repo, ".coding-agents", "runner.md"), modernPacketFollowedByLegacyRunnerPacket("legacy-boundary"), "utf8");
+
+    const doctor = runCli(["doctor", "--target-cwd", repo]);
+    assert.equal(doctor.status, 0, doctor.stdout + doctor.stderr);
+    assert.doesNotMatch(doctor.stdout, /duplicated/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("doctor still reports duplicate identity fields inside a modern runner packet", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, { taskId: "runner-duplicate", epoch: "e1", scope: "README.md" });
+    const runner = modernRunnerPacket("runner-duplicate")
+      .replace("- task_id: runner-duplicate", "- task_id: runner-duplicate\n- task_id: duplicate");
+    writeFileSync(path.join(repo, ".coding-agents", "runner.md"), runner, "utf8");
+
+    const doctor = runCli(["doctor", "--target-cwd", repo]);
+    assert.notEqual(doctor.status, 0);
+    assert.match(doctor.stdout, /task_id duplicated/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("codex-cli runner fails when it writes outside the machine-checkable scope", () => {
   const repo = makeTempGitRepo();
   const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
@@ -1426,5 +1456,46 @@ This file records legacy packets without work_type.
 - next: parent final verification
 - debugging_integrity: debug work requires root cause and verification
 - lifecycle: Parent integrates this packet, records any blocker or follow-up, then closes or retires the subagent unless an explicitly scoped continuation is required.
+`;
+}
+
+function modernRunnerPacket(taskId) {
+  return `# Coding Agents Runner
+
+## Issued Assignments
+
+### 2026-06-13T00:00:00.000Z Implementer ${taskId}
+
+- type: assignment
+- role: Implementer
+- status: assigned
+- task_id: ${taskId}
+- epoch: e1
+- scope: README.md
+- feature_profile: none
+- work_type: auto
+- invocation_cwd: /tmp/modern
+- target_cwd: /tmp/modern
+- assignment: make a scoped documentation change
+- expected_output: assignment packet
+- nested_coding_agents_preflight: parent already selected Coding Agents
+- debugging_integrity: debug work requires root cause and verification
+- lifecycle: return concise parent-integration material, then stop
+`;
+}
+
+function modernPacketFollowedByLegacyRunnerPacket(taskId) {
+  return `${modernRunnerPacket(taskId)}
+## runner packet: legacy-import
+
+- type: assignment
+- role: Implementer
+- task_id: legacy-task
+- epoch: legacy-epoch
+- scope: legacy-scope
+- assignment: legacy docs/codex packet outside the modern section
+- expected_output: legacy integration material
+- debugging_integrity: legacy text outside modern packet
+- lifecycle: legacy lifecycle outside modern packet
 `;
 }

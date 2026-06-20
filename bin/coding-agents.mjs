@@ -1605,7 +1605,7 @@ function validateRoleAssignments(text, workflowGate = { required: false }) {
 }
 
 function validateRunnerPackets(text, workflowGate = { required: false }) {
-  const sections = text.split(/^### /m).slice(1).map((section) => `### ${section}`);
+  const sections = getModernRunnerPacketSections(text);
   const invalidPackets = [];
   const invalidMetacognitivePackets = [];
   let checked = 0;
@@ -1682,6 +1682,20 @@ function validateRunnerPackets(text, workflowGate = { required: false }) {
     results.push(["warn", `missing or incomplete metacognitive runner packet fields: ${invalidMetacognitivePackets.join(", ")}`]);
   }
   return { results, fatal: true };
+}
+
+function getModernRunnerPacketSections(text) {
+  const content = String(text || "");
+  const sections = [];
+  const starts = [...content.matchAll(/^### /gm)].map((match) => match.index);
+  for (let index = 0; index < starts.length; index += 1) {
+    const start = starts[index];
+    const nextModernStart = starts[index + 1] ?? content.length;
+    const legacyOffset = content.slice(start, nextModernStart).search(/^## runner packet:/im);
+    const end = legacyOffset === -1 ? nextModernStart : start + legacyOffset;
+    sections.push(content.slice(start, end));
+  }
+  return sections;
 }
 
 function classifyMetacognitiveGate(parts, workType = { id: DEFAULT_WORK_TYPE }) {
