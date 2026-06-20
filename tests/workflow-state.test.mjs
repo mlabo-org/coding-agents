@@ -404,6 +404,9 @@ test("valid feature profile renders in assignment, collect, and run skeleton pac
     assert.match(runner, /type: assignment[\s\S]*feature_profile: debug\.reproducer/);
     assert.match(runner, /type: parent-integration[\s\S]*feature_profile: debug\.reproducer/);
     assert.match(runner, /type: process-orchestration-skeleton[\s\S]*feature_profile: debug\.reproducer/);
+    assert.match(runner, /type: assignment[\s\S]*feature_profile: debug\.reproducer\n- work_type: auto/);
+    assert.match(runner, /type: parent-integration[\s\S]*feature_profile: debug\.reproducer\n- work_type: auto/);
+    assert.match(runner, /type: process-orchestration-skeleton[\s\S]*feature_profile: debug\.reproducer\n- work_type: auto/);
     assert.match(runner, /feature_profile_guidance: .*reproduce the expected versus actual behavior/);
     assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
   } finally {
@@ -545,6 +548,83 @@ test("unknown feature profiles fail before runner state is appended", () => {
   }
 });
 
+test("unknown work types fail before runner state is appended", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, { taskId: "work-type-reject", epoch: "e1", scope: "README.md" });
+
+    for (const args of [
+      [
+        "assign",
+        "--target-cwd",
+        repo,
+        "--role",
+        "Implementer",
+        "--task-id",
+        "work-type-reject",
+        "--epoch",
+        "e1",
+        "--scope",
+        "README.md",
+        "--work-type",
+        "mystery",
+        "--assignment",
+        "make a scoped change",
+        "--expected-output",
+        "assignment packet",
+      ],
+      [
+        "collect",
+        "--target-cwd",
+        repo,
+        "--role",
+        "Implementer",
+        "--task-id",
+        "work-type-reject",
+        "--epoch",
+        "e1",
+        "--scope",
+        "README.md",
+        "--work-type",
+        "mystery",
+        "--status",
+        "blocked",
+        "--blockers",
+        "unknown work type",
+        "--next",
+        "retry with known work type",
+      ],
+      [
+        "run",
+        "--target-cwd",
+        repo,
+        "--role",
+        "Implementer",
+        "--task-id",
+        "work-type-reject",
+        "--epoch",
+        "e1",
+        "--scope",
+        "README.md",
+        "--work-type",
+        "mystery",
+        "--assignment",
+        "make a scoped change",
+        "--expected-output",
+        "runner packet",
+      ],
+    ]) {
+      const rejected = runCli(args);
+      assert.notEqual(rejected.status, 0, `${args[0]} unexpectedly passed`);
+      assert.match(rejected.stderr, /unknown work type: mystery/);
+      assert.match(rejected.stderr, /auto, documentation, source-change, debug/);
+      assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
+    }
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("omitted feature profile remains backwards compatible and records none", () => {
   const repo = makeTempGitRepo();
   try {
@@ -596,6 +676,21 @@ test("omitted feature profile remains backwards compatible and records none", ()
     assert.match(runner, /feature_profile: none/);
     assert.doesNotMatch(runner, /feature_profile_guidance:/);
     assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("runner packets without work_type remain backwards compatible", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, { taskId: "work-type-legacy", epoch: "e1", scope: "README.md" });
+    writeFileSync(path.join(repo, ".coding-agents", "runner.md"), legacyRunnerWithoutWorkType("work-type-legacy"), "utf8");
+
+    const verify = runCli(["verify-assignments", "--target-cwd", repo]);
+    assert.equal(verify.status, 0, verify.stdout + verify.stderr);
+    const doctor = runCli(["doctor", "--target-cwd", repo]);
+    assert.equal(doctor.status, 0, doctor.stdout + doctor.stderr);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -922,4 +1017,52 @@ function runCli(args, options = {}) {
 
 function readState(repo, file) {
   return readFileSync(path.join(repo, ".coding-agents", file), "utf8");
+}
+
+function legacyRunnerWithoutWorkType(taskId) {
+  return `# Coding Agents Runner
+
+This file records legacy packets without work_type.
+
+## Issued Assignments
+
+### 2026-06-13T00:00:00.000Z Implementer ${taskId}
+
+- type: assignment
+- role: Implementer
+- status: assigned
+- task_id: ${taskId}
+- epoch: e1
+- scope: README.md
+- feature_profile: none
+- invocation_cwd: /tmp/legacy
+- target_cwd: /tmp/legacy
+- assignment: make a scoped documentation change
+- expected_output: assignment packet
+- nested_coding_agents_preflight: parent already selected Coding Agents
+- debugging_integrity: debug work requires root cause and verification
+- lifecycle: return concise parent-integration material, then stop
+
+## Parent Integration Packets
+
+### 2026-06-13T00:01:00.000Z Implementer ${taskId}
+
+- type: parent-integration
+- role: Implementer
+- status: completed
+- task_id: ${taskId}
+- epoch: e1
+- scope: README.md
+- feature_profile: none
+- invocation_cwd: /tmp/legacy
+- target_cwd: /tmp/legacy
+- findings: legacy packet completed documentation work
+- changed_files: README.md
+- verification: not run
+- blockers: none
+- assumptions: none
+- next: parent final verification
+- debugging_integrity: debug work requires root cause and verification
+- lifecycle: Parent integrates this packet, records any blocker or follow-up, then closes or retires the subagent unless an explicitly scoped continuation is required.
+`;
 }

@@ -359,6 +359,124 @@ test("source-change work triggers the metacognitive gate", () => {
   }
 });
 
+test("explicit debug work type triggers the metacognitive gate with bland text", () => {
+  const repo = makeTempGitRepo();
+  try {
+    const intake = runCli([
+      "intake",
+      "--target-cwd",
+      repo,
+      "--work-type",
+      "debug",
+      "--task",
+      "Organize the scoped work",
+      "--task-id",
+      "meta-debug-work-type",
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+    ]);
+
+    assert.equal(intake.status, 0, intake.stderr);
+    assert.match(intake.stdout, /ok work_type: debug/);
+    assert.match(intake.stdout, /ok metacognitive_gate_required: true/);
+    assert.match(intake.stdout, /work_type: debug/);
+    assert.match(readState(repo, "task.md"), /work_type: debug/);
+    assert.match(readState(repo, "task.md"), /metacognitive_gate_triggers: work_type: debug/);
+    assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("documentation work type suppresses keyword and path inference for docs-only intake and collect", () => {
+  const repo = makeTempGitRepo();
+  try {
+    const intake = runCli([
+      "intake",
+      "--target-cwd",
+      repo,
+      "--work-type",
+      "documentation",
+      "--task",
+      "Document debug, repair, and source-change terms without editing source",
+      "--task-id",
+      "meta-doc-work-type",
+      "--epoch",
+      "e1",
+      "--scope",
+      "tests/documentation-debug-notes.mjs",
+    ]);
+
+    assert.equal(intake.status, 0, intake.stderr);
+    assert.match(intake.stdout, /ok work_type: documentation/);
+    assert.match(intake.stdout, /ok metacognitive_gate_required: false/);
+    assert.match(readState(repo, "task.md"), /work_type: documentation/);
+    assert.match(readState(repo, "task.md"), /metacognitive_gate_triggers: none/);
+
+    const collected = runCli([
+      "collect",
+      "--target-cwd",
+      repo,
+      "--work-type",
+      "documentation",
+      "--role",
+      "Docs Keeper",
+      "--task-id",
+      "meta-doc-work-type",
+      "--epoch",
+      "e1",
+      "--scope",
+      "tests/documentation-debug-notes.mjs",
+      "--status",
+      "completed",
+      "--findings",
+      "documented debug and source-change wording only",
+      "--changed-files",
+      "docs/debug-source-change.md",
+      "--verification",
+      "not run",
+    ]);
+    assert.equal(collected.status, 0, collected.stderr);
+    const runner = readState(repo, "runner.md");
+    assert.match(runner, /type: parent-integration[\s\S]*work_type: documentation/);
+    assert.doesNotMatch(runner, /metacognitive_gate_required: true/);
+    assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("explicit auto work type preserves current keyword and path inference", () => {
+  const repo = makeTempGitRepo();
+  try {
+    const intake = runCli([
+      "intake",
+      "--target-cwd",
+      repo,
+      "--work-type",
+      "auto",
+      "--task",
+      "Organize the scoped work",
+      "--task-id",
+      "meta-auto-work-type",
+      "--epoch",
+      "e1",
+      "--scope",
+      "bin/coding-agents.mjs",
+    ]);
+
+    assert.equal(intake.status, 0, intake.stderr);
+    assert.match(intake.stdout, /ok work_type: auto/);
+    assert.match(intake.stdout, /ok metacognitive_gate_required: true/);
+    assert.match(intake.stdout, /source\/test\/config path scope/);
+    assert.match(readState(repo, "task.md"), /work_type: auto/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("source, test, and config path scopes trigger the metacognitive gate even with bland task text", () => {
   const repo = makeTempGitRepo();
   try {
@@ -816,6 +934,66 @@ test("non gate tasks do not require metacognitive completion fields", () => {
       "not run",
     ]);
     assert.equal(collected.status, 0, collected.stderr);
+    assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("documentation work type cannot downgrade an existing gate-required workflow", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intakeGateRequired(repo, "meta-doc-sticky");
+
+    const assigned = runCli([
+      "assign",
+      "--target-cwd",
+      repo,
+      "--work-type",
+      "documentation",
+      "--role",
+      "Docs Keeper",
+      "--task-id",
+      "meta-doc-sticky",
+      "--epoch",
+      "e1",
+      "--scope",
+      "bin/coding-agents.mjs",
+      "--assignment",
+      "write documentation notes for the gate-required source task",
+      "--expected-output",
+      "documentation packet",
+    ]);
+    assert.equal(assigned.status, 0, assigned.stderr);
+    const runner = readState(repo, "runner.md");
+    assert.match(runner, /work_type: documentation/);
+    assert.match(runner, /metacognitive_gate_required: true/);
+
+    const rejected = runCli([
+      "collect",
+      "--target-cwd",
+      repo,
+      "--work-type",
+      "documentation",
+      "--role",
+      "Docs Keeper",
+      "--task-id",
+      "meta-doc-sticky",
+      "--epoch",
+      "e1",
+      "--scope",
+      "bin/coding-agents.mjs",
+      "--status",
+      "completed",
+      "--findings",
+      "documented the source change",
+      "--changed-files",
+      "README.md",
+      "--verification",
+      "not run",
+    ]);
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stderr, /collect --status completed rejected/);
     assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
   } finally {
     rmSync(repo, { recursive: true, force: true });

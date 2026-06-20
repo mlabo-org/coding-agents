@@ -50,6 +50,13 @@ const FEATURE_PROFILE_GUIDANCE = {
     "Overlay for this assignment instance: protect .coding-agents workflow state identity, append only validated packets, and avoid tracked-state leakage.",
 };
 const DEFAULT_FEATURE_PROFILE = "none";
+const WORK_TYPE_GUIDANCE = {
+  auto: "Infer gate classification from task text, packet text, and path-like scope. This preserves existing behavior.",
+  documentation: "Semantic metadata for docs-only work. Suppresses keyword/path metacognitive gate inference for this command, but does not downgrade gate-required workflow state.",
+  "source-change": "Semantic metadata for source/config/test/canonical editing. Forces the metacognitive source-change gate for this command.",
+  debug: "Semantic metadata for debugging or failure-correction work. Forces the metacognitive debug/root-cause gate for this command.",
+};
+const DEFAULT_WORK_TYPE = "auto";
 
 const METACOGNITIVE_GATE_FIELDS = [
   "expected_outcome",
@@ -210,7 +217,7 @@ function intake(args) {
   const taskId = requireIdentityArg(args.taskId, "--task-id");
   const epoch = requireIdentityArg(args.epoch, "--epoch");
   const scope = requireIdentityArg(args.scope, "--scope");
-  const metacognitiveGate = classifyMetacognitiveGate({ task, scope });
+  const metacognitiveGate = classifyMetacognitiveGate({ task, scope }, commandContext.workType);
   const state = resolveWorkflowState(commandContext.targetCwd);
   prepareStateWrite(state);
   mkdirSync(state.stateDir, { recursive: true });
@@ -223,6 +230,7 @@ function intake(args) {
     taskId,
     epoch,
     scope,
+    workType: commandContext.workType,
     stateDir: state.stateDir,
     gitRoot: state.gitRoot,
     timestamp: new Date().toISOString(),
@@ -239,6 +247,7 @@ function intake(args) {
   console.log(`ok task_id: ${taskId}`);
   console.log(`ok epoch: ${epoch}`);
   console.log(`ok scope: ${scope}`);
+  console.log(`ok work_type: ${workTypeId(commandContext)}`);
   console.log(`ok metacognitive_gate_required: ${metacognitiveGate.required}`);
   if (metacognitiveGate.required) console.log(`ok metacognitive_gate_triggers: ${metacognitiveGate.triggers.join(", ")}`);
   printLegacyHints(state);
@@ -267,6 +276,7 @@ function assign(args) {
   console.log(`ok epoch: ${packet.epoch}`);
   console.log(`ok scope: ${packet.scope}`);
   console.log(`ok feature_profile: ${featureProfileId(packet)}`);
+  console.log(`ok work_type: ${workTypeId(packet)}`);
 }
 
 function collect(args) {
@@ -278,6 +288,7 @@ function collect(args) {
   console.log(`ok status: ${packet.status}`);
   console.log(`ok task_id: ${packet.taskId}`);
   console.log(`ok feature_profile: ${featureProfileId(packet)}`);
+  console.log(`ok work_type: ${workTypeId(packet)}`);
 }
 
 function run(args) {
@@ -295,6 +306,7 @@ function run(args) {
     console.log(`ok exit_code: ${formatExitCode(result.exitCode)}`);
     console.log(`ok status: ${result.status}`);
     console.log(`ok feature_profile: ${featureProfileId(packet)}`);
+    console.log(`ok work_type: ${workTypeId(packet)}`);
     if (result.summary) console.log(`ok summary: ${result.summary}`);
     if (result.status !== "completed") {
       throw new CliError(`runner ${result.runner} failed: ${result.failure}`, result.exitCode || 1);
@@ -307,6 +319,7 @@ function run(args) {
   console.log(`ok run skeleton: ${packet.role}`);
   console.log("ok spawned: false");
   console.log(`ok feature_profile: ${featureProfileId(packet)}`);
+  console.log(`ok work_type: ${workTypeId(packet)}`);
   console.log("ok note: real process orchestration is deferred; runner recorded the scoped assignment and skeleton only");
 }
 
@@ -397,6 +410,7 @@ function normalizeCodexResult(packet, context) {
     epoch: packet.epoch,
     scope: packet.scope,
     featureProfile: packet.featureProfile,
+    workType: packet.workType,
     invocationCwd: packet.invocationCwd,
     targetCwd: packet.targetCwd,
     runner,
@@ -431,6 +445,7 @@ task_id: ${packet.taskId}
 epoch: ${packet.epoch}
 scope: ${packet.scope}
 feature_profile: ${featureProfileId(packet)}
+work_type: ${workTypeId(packet)}
 invocation_cwd: ${packet.invocationCwd}
 target_cwd: ${packet.targetCwd}
 assignment: ${packet.assignment}
@@ -648,6 +663,7 @@ function renderProject(context) {
 - task_id: ${context.taskId}
 - epoch: ${context.epoch}
 - scope: ${context.scope}
+- work_type: ${workTypeId(context)}
 `;
 }
 
@@ -657,6 +673,7 @@ function renderTask(context) {
 - task_id: ${context.taskId}
 - epoch: ${context.epoch}
 - scope: ${context.scope}
+- work_type: ${workTypeId(context)}
 - task: ${context.task}
 
 ## ${METACOGNITIVE_GATE_NAME}
@@ -717,6 +734,7 @@ function renderDecisions(context) {
 ## D-${context.taskId}-006 ${METACOGNITIVE_GATE_NAME}
 
 - accepted: metacognitive_gate_required=${context.metacognitiveGate.required} for this task.
+- work_type: ${workTypeId(context)}
 - triggers: ${formatTriggers(context.metacognitiveGate)}
 - impact: gate-required work must record expected/actual outcome evidence, boundaries, before/after context effects, cross-feature consequences, root cause, fix, verification, skipped checks, unresolved risks, and next investigation before completion is accepted.
 `;
@@ -735,6 +753,7 @@ function renderAudit(context) {
 - task_id: ${context.taskId}
 - epoch: ${context.epoch}
 - scope: ${context.scope}
+- work_type: ${workTypeId(context)}
 - git_status: ${context.gitStatus.ok ? summarizeGit(context.gitStatus.output) : `unavailable (${context.gitStatus.error})`}
 - metacognitive_gate_required: ${context.metacognitiveGate.required}
 - metacognitive_gate_triggers: ${formatTriggers(context.metacognitiveGate)}
@@ -811,6 +830,7 @@ You are a coding-agents worker for task \`${context.taskId}\`.
 - task: ${context.task}
 - epoch: ${context.epoch}
 - scope: ${context.scope}
+- work_type: ${workTypeId(context)}
 
 Read \`${STATE_DIR_NAME}/README.md\`, then \`project.md\`, \`task.md\`, \`todo.md\`, \`decisions.md\`, \`assignments.md\`, \`audit.md\`, and \`runner.md\` if present.
 Preserve unrelated edits. Work only inside scope. Update \`${STATE_DIR_NAME}/audit.md\` with verification results before handoff.
@@ -1082,6 +1102,7 @@ function requireAssignmentPacket(args, commandContext) {
     epoch: requireIdentityArg(args.epoch, "--epoch"),
     scope: requireIdentityArg(args.scope, "--scope"),
     featureProfile: resolveFeatureProfile(args.featureProfile),
+    workType: commandContext.workType,
     invocationCwd: commandContext.invocationCwd,
     targetCwd: commandContext.targetCwd,
     assignment: singleLine(requireArg(args.assignment, "--assignment")),
@@ -1104,6 +1125,7 @@ function requireIntegrationPacket(args, commandContext) {
     epoch: requireIdentityArg(args.epoch, "--epoch"),
     scope: requireIdentityArg(args.scope, "--scope"),
     featureProfile: resolveFeatureProfile(args.featureProfile),
+    workType: commandContext.workType,
     invocationCwd: commandContext.invocationCwd,
     targetCwd: commandContext.targetCwd,
     findings: singleLine(args.findings || "none"),
@@ -1295,6 +1317,7 @@ function renderAssignmentPacket(packet) {
 - epoch: ${packet.epoch}
 - scope: ${packet.scope}
 - feature_profile: ${featureProfileId(packet)}
+- work_type: ${workTypeId(packet)}
 - invocation_cwd: ${packet.invocationCwd}
 - target_cwd: ${packet.targetCwd}
 - assignment: ${packet.assignment}
@@ -1316,6 +1339,7 @@ function renderIntegrationPacket(packet) {
 - epoch: ${packet.epoch}
 - scope: ${packet.scope}
 - feature_profile: ${featureProfileId(packet)}
+- work_type: ${workTypeId(packet)}
 - invocation_cwd: ${packet.invocationCwd}
 - target_cwd: ${packet.targetCwd}
 - findings: ${packet.findings}
@@ -1342,6 +1366,7 @@ function renderOrchestrationSkeleton(packet) {
 - epoch: ${packet.epoch}
 - scope: ${packet.scope}
 - feature_profile: ${featureProfileId(packet)}
+- work_type: ${workTypeId(packet)}
 - invocation_cwd: ${packet.invocationCwd}
 - target_cwd: ${packet.targetCwd}
 - assignment: ${packet.assignment}
@@ -1365,6 +1390,7 @@ function renderRunnerResult(result) {
 - epoch: ${result.epoch}
 - scope: ${result.scope}
 - feature_profile: ${featureProfileId(result)}
+- work_type: ${workTypeId(result)}
 - invocation_cwd: ${result.invocationCwd}
 - target_cwd: ${result.targetCwd}
 - runner: ${result.runner}
@@ -1545,6 +1571,10 @@ function validateRunnerPackets(text, workflowGate = { required: false }) {
     if (featureProfile && !isKnownFeatureProfileId(featureProfile)) {
       invalidPackets.push(`${packetLabel(section)}.feature_profile unknown (${featureProfile})`);
     }
+    const workType = getFieldValue(section, "work_type");
+    if (workType && !isKnownWorkTypeId(workType)) {
+      invalidPackets.push(`${packetLabel(section)}.work_type unknown (${workType})`);
+    }
     if (type === "assignment" || type === "process-orchestration-skeleton") {
       for (const field of ["assignment", "expected_output", "debugging_integrity", "lifecycle"]) {
         if (!getFieldValue(section, field)) {
@@ -1597,7 +1627,17 @@ function validateRunnerPackets(text, workflowGate = { required: false }) {
   return { results, fatal: true };
 }
 
-function classifyMetacognitiveGate(parts) {
+function classifyMetacognitiveGate(parts, workType = { id: DEFAULT_WORK_TYPE }) {
+  const workTypeIdValue = typeof workType === "string" ? workType : workType?.id || DEFAULT_WORK_TYPE;
+  if (workTypeIdValue === "documentation") {
+    return { required: false, triggers: [] };
+  }
+  if (workTypeIdValue === "source-change") {
+    return { required: true, triggers: ["work_type: source-change"] };
+  }
+  if (workTypeIdValue === "debug") {
+    return { required: true, triggers: ["work_type: debug"] };
+  }
   const text = Object.values(parts || {})
     .filter((value) => value !== undefined && value !== null)
     .map((value) => String(value))
@@ -1641,9 +1681,10 @@ function readWorkflowMetacognitiveContext(stateDir) {
   const epoch = identity.epoch;
   const scope = identity.scope;
   const task = getFieldValue(text, "task");
+  const workType = resolveWorkType(getFieldValue(text, "work_type") || DEFAULT_WORK_TYPE);
   const declaredRequired = getFieldValue(text, "metacognitive_gate_required") === "true";
   const declaredTriggers = splitList(getFieldValue(text, "metacognitive_gate_triggers")).filter((item) => item !== "none");
-  const classified = classifyMetacognitiveGate({ task, scope });
+  const classified = classifyMetacognitiveGate({ task, scope }, workType);
   const gate = mergeMetacognitiveGates(
     classified,
     declaredRequired ? { required: true, triggers: declaredTriggers.length ? declaredTriggers : ["declared"] } : null,
@@ -1654,6 +1695,7 @@ function readWorkflowMetacognitiveContext(stateDir) {
     epoch,
     scope,
     task,
+    workType,
     identityErrors: identity.errors,
   };
 }
@@ -1669,7 +1711,7 @@ function resolvePacketMetacognitiveGate(commandContext, packet) {
     verification: packet.verification,
     blockers: packet.blockers,
     next: packet.next,
-  });
+  }, packet.workType);
   const currentTaskGate =
     workflowGate.required && (!workflowGate.taskId || !packet.taskId || workflowGate.taskId === packet.taskId)
       ? workflowGate
@@ -1774,7 +1816,7 @@ function runnerPacketMetacognitiveRequired(section, workflowGate) {
     expectedOutput: getFieldValue(section, "expected_output"),
     summary: getFieldValue(section, "summary"),
     failure: getFieldValue(section, "failure"),
-  });
+  }, getFieldValue(section, "work_type") || DEFAULT_WORK_TYPE);
   const currentTaskGate =
     workflowGate.required && (!workflowGate.taskId || getFieldValue(section, "task_id") === workflowGate.taskId)
       ? workflowGate
@@ -2164,6 +2206,7 @@ function resolveCommandContext(args) {
   return {
     invocationCwd,
     targetCwd,
+    workType: resolveWorkType(args.workType),
   };
 }
 
@@ -2209,6 +2252,19 @@ function resolveFeatureProfile(value) {
   };
 }
 
+function resolveWorkType(value) {
+  const id = value === undefined || value === null || !String(value).trim()
+    ? DEFAULT_WORK_TYPE
+    : singleLine(value);
+  if (!isKnownWorkTypeId(id)) {
+    throw new CliError(`unknown work type: ${id}; expected one of ${knownWorkTypeIds().join(", ")}`, 1);
+  }
+  return {
+    id,
+    guidance: WORK_TYPE_GUIDANCE[id],
+  };
+}
+
 function isKnownFeatureProfileId(id) {
   return id === DEFAULT_FEATURE_PROFILE || Object.prototype.hasOwnProperty.call(FEATURE_PROFILE_GUIDANCE, id);
 }
@@ -2219,6 +2275,18 @@ function knownFeatureProfileIds() {
 
 function featureProfileId(packet) {
   return packet?.featureProfile?.id || DEFAULT_FEATURE_PROFILE;
+}
+
+function isKnownWorkTypeId(id) {
+  return Object.prototype.hasOwnProperty.call(WORK_TYPE_GUIDANCE, id);
+}
+
+function knownWorkTypeIds() {
+  return Object.keys(WORK_TYPE_GUIDANCE);
+}
+
+function workTypeId(packet) {
+  return packet?.workType?.id || DEFAULT_WORK_TYPE;
 }
 
 function renderFeatureProfilePacketGuidance(packet) {
@@ -2293,10 +2361,10 @@ function printHelp() {
   console.log(`coding-agents MVP CLI
 
 Usage:
-  node bin/coding-agents.mjs intake [--cwd <path>] [--target-cwd <path>] --task <text> --task-id <id> --epoch <epoch> --scope <scope>
-  node bin/coding-agents.mjs assign [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] --assignment <text> --expected-output <text>
-  node bin/coding-agents.mjs collect [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] --status <status> [--findings <text>] [--changed-files <text>] [--verification <text>] [--blockers <text>] [--assumptions <text>] [--next <text>] [--expected-outcome <text>] [--actual-result <text>] [--reproduction-or-evidence <text>] [--failure-point <text>] [--hypothesis-branches <text>] [--source-of-truth-boundary <text>] [--plugin-contract-boundary <text>] [--generated-artifact-boundary <text>] [--before-context-effects <text>] [--after-context-effects <text>] [--cross-feature-consequences <text>] [--root-cause <text>] [--fix-summary <text>] [--verification-evidence <text>] [--skipped-checks <text>] [--unresolved-risks <text>] [--next-investigation <text>]
-  node bin/coding-agents.mjs run|orchestrate [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] --assignment <text> --expected-output <text> [--runner codex-cli] [--timeout-ms <ms>]
+  node bin/coding-agents.mjs intake [--cwd <path>] [--target-cwd <path>] [--work-type <id>] --task <text> --task-id <id> --epoch <epoch> --scope <scope>
+  node bin/coding-agents.mjs assign [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] --assignment <text> --expected-output <text>
+  node bin/coding-agents.mjs collect [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] --status <status> [--findings <text>] [--changed-files <text>] [--verification <text>] [--blockers <text>] [--assumptions <text>] [--next <text>] [--expected-outcome <text>] [--actual-result <text>] [--reproduction-or-evidence <text>] [--failure-point <text>] [--hypothesis-branches <text>] [--source-of-truth-boundary <text>] [--plugin-contract-boundary <text>] [--generated-artifact-boundary <text>] [--before-context-effects <text>] [--after-context-effects <text>] [--cross-feature-consequences <text>] [--root-cause <text>] [--fix-summary <text>] [--verification-evidence <text>] [--skipped-checks <text>] [--unresolved-risks <text>] [--next-investigation <text>]
+  node bin/coding-agents.mjs run|orchestrate [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] --assignment <text> --expected-output <text> [--runner codex-cli] [--timeout-ms <ms>]
   node bin/coding-agents.mjs verify-assignments [--cwd <path>] [--target-cwd <path>]
   node bin/coding-agents.mjs normalize-debugging-integrity [--cwd <path>] [--target-cwd <path>] [--execute]
   node bin/coding-agents.mjs handoff [--cwd <path>] [--target-cwd <path>] --task-id <id>
@@ -2327,6 +2395,9 @@ State:
   Generated assignments, handoff prompts, and runner packets carry lifecycle closure and debugging integrity rules.
   Parent-managed child-worker prompts also suppress nested Coding Agents preflight; child workers do not ask \`coding-agents を使いますか？ [Y/n]\` or start nested Coding Agents workflows inside an assigned task_id/epoch/scope.
   Optional --feature-profile overlays provide scoped assignment guidance only. Known ids: ${knownFeatureProfileIds().join(", ")}.
+  Optional --work-type is semantic command metadata. Known ids: ${knownWorkTypeIds().join(", ")}.
+  --work-type auto preserves keyword/path inference. --work-type source-change and --work-type debug force the metacognitive gate for that command.
+  --work-type documentation suppresses keyword/path gate inference for that command only; it does not replace debug/root-cause gates and cannot downgrade existing gate-required workflow state.
   Debug or repair work must identify root cause and verify the intended outcome; log-only, fallback-only, skip-only, failure-output-only, or return-to-main-loop-only changes are not completion.
   Gate-required source-change/debug/repair/source-of-truth/plugin-contract/generated-artifact inconsistency work also carries ${METACOGNITIVE_GATE_NAME} fields and rejects completed collection without them.
 `);
