@@ -727,7 +727,7 @@ function intakeGateRequired(repo, taskId) {
     "--epoch",
     "e1",
     "--scope",
-    "bin/coding-agents.mjs source-of-truth",
+    "bin/coding-agents.mjs",
   ]);
   assert.equal(result.status, 0, result.stderr);
 }

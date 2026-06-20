@@ -211,8 +211,9 @@ function intake(args) {
 
 function handoff(args) {
   const commandContext = resolveCommandContext(args);
-  requireArg(args.taskId, "--task-id");
+  const taskId = requireArg(args.taskId, "--task-id");
   const state = resolveWorkflowState(commandContext.targetCwd);
+  assertHandoffTaskMatches(state, taskId);
   printLegacyHints(state);
   const handoffPath = path.join(state.stateDir, "handoff.md");
   if (!existsSync(handoffPath)) {
@@ -224,6 +225,7 @@ function handoff(args) {
 function assign(args) {
   const commandContext = resolveCommandContext(args);
   const packet = requireAssignmentPacket(args, commandContext);
+  assertValidIntakeForPacket(commandContext, packet, "assign");
   appendRunnerEntry(commandContext, "Issued Assignments", renderAssignmentPacket(packet));
   console.log(`ok assignment: ${packet.role}`);
   console.log(`ok task_id: ${packet.taskId}`);
@@ -234,6 +236,7 @@ function assign(args) {
 function collect(args) {
   const commandContext = resolveCommandContext(args);
   const packet = requireIntegrationPacket(args, commandContext);
+  assertValidIntakeForPacket(commandContext, packet, "collect");
   appendRunnerEntry(commandContext, "Parent Integration Packets", renderIntegrationPacket(packet));
   console.log(`ok parent-integration: ${packet.role}`);
   console.log(`ok status: ${packet.status}`);
@@ -243,6 +246,8 @@ function collect(args) {
 function run(args) {
   const commandContext = resolveCommandContext(args);
   const packet = requireAssignmentPacket(args, commandContext);
+  assertValidIntakeForPacket(commandContext, packet, args.command || "run");
+  if (args.runner) assertMachineRunnableScope(packet, commandContext.targetCwd);
   appendRunnerEntry(commandContext, "Issued Assignments", renderAssignmentPacket(packet));
 
   if (args.runner) {
@@ -279,6 +284,7 @@ function runCodexCli(commandContext, packet, args) {
   const outputPath = path.join(tempDir, "last-message.md");
   const prompt = renderRunnerPrompt(packet);
   const cwd = commandContext.targetCwd;
+  const beforePaths = readGitChangedPaths(cwd);
   const codexArgs = [
     "exec",
     "--cd",
@@ -302,12 +308,13 @@ function runCodexCli(commandContext, packet, args) {
       timeout: timeoutMs,
       maxBuffer: 1024 * 1024,
     });
-    return normalizeCodexResult(packet, {
+    const normalized = normalizeCodexResult(packet, {
       runner: "codex-cli",
       timeoutMs,
       outputPath,
       result,
     });
+    return applyScopeGuard(normalized, packet, cwd, beforePaths);
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
@@ -501,6 +508,10 @@ function doctor(args) {
   results.push(...assignmentValidation.results);
   fatal = fatal || assignmentValidation.fatal;
 
+  const excludeValidation = checkStateExcluded(state);
+  results.push(...excludeValidation.results);
+  fatal = fatal || excludeValidation.fatal;
+
   const taskPath = path.join(stateDir, "task.md");
   if (existsSync(taskPath)) {
     const text = readFileSync(taskPath, "utf8");
@@ -553,7 +564,7 @@ Read these planning files in order:
 2. \`task.md\`: active task contract.
 3. \`todo.md\`: executable checklist.
 4. \`decisions.md\`: accepted decisions.
-5. \`assignments.md\`: 14 role warm-pool assignments.
+5. \`assignments.md\`: fixed 14-role assignment scaffold; these sections are not resident agents.
 6. \`audit.md\`: checks and warnings.
 7. \`handoff.md\`: prompt for the next worker.
 
@@ -597,7 +608,7 @@ ${renderMetacognitiveGateState(context.metacognitiveGate)}
 ## Completion Conditions
 
 - Eight planning files exist in \`${STATE_DIR_NAME}\`.
-- 14 role assignments include \`role\`, \`status\`, \`task_id\`, \`epoch\`, \`scope\`, \`assignment\`, \`expected_output\`, and \`lifecycle\`.
+- Fixed 14-role assignment scaffold sections include \`role\`, \`status\`, \`task_id\`, \`epoch\`, \`scope\`, \`assignment\`, \`expected_output\`, and \`lifecycle\`.
 - Each generated assignment carries lifecycle guidance requiring concise integration material and prompt close/retire handling.
 - Each generated child-worker prompt, assignment, handoff, and runner packet carries the nested Coding Agents preflight suppression rule.
 - Debug or repair work is not complete until root cause is identified, fixed, and verified against the intended outcome.
@@ -611,7 +622,7 @@ function renderTodo(context) {
 
 - [x] ${context.taskId}.1 Run Coding Agents intake for \`${context.cwd}\`.
 - [x] ${context.taskId}.2 Generate or update \`${STATE_DIR_NAME}\` planning files.
-- [x] ${context.taskId}.3 Create 14 scoped role assignments for epoch \`${context.epoch}\`.
+- [x] ${context.taskId}.3 Create or update the fixed 14-role assignment scaffold for epoch \`${context.epoch}\`.
 - [ ] ${context.taskId}.4 Execute work inside scope \`${context.scope}\`.
 - [ ] ${context.taskId}.5 Run verification and update \`audit.md\`.
 `;
@@ -681,23 +692,25 @@ function renderAudit(context) {
 
 function renderAssignments(context) {
   const assignments = {
-    Intake: ["assigned", "Confirm project instructions, cwd, task, existing workflow state, and whether this is debug or repair work.", "Intake summary with blockers and debug classification."],
-    "Repo Mapper": ["assigned", "Map repository structure and likely edit boundaries.", "Repo map and source boundaries."],
-    Requirements: ["assigned", "Extract explicit requirements, non-goals, expected outcome, and actual failure when debugging.", "Requirement list with ambiguity notes and failure contract if applicable."],
-    Planner: ["assigned", "Convert requirements into an executable task sequence.", "Plan with ordered checkpoints."],
-    Architect: ["assigned", "Identify design constraints, integration points, and likely failure point for debug work.", "Architecture notes, risk points, and failure-path notes."],
-    Implementer: ["assigned", "Make scoped code or document changes when requested; for debug work, fix the root cause instead of masking failure.", "Changed files, implementation notes, and root-cause fix notes when applicable."],
-    "Test Runner": ["assigned", "Run allowed verification commands; for debug work, verify the intended outcome now succeeds.", "Verification output, skipped checks, and outcome evidence."],
-    Reviewer: ["assigned", "Review diffs for regressions, missing requirements, and log-only or fallback-only debug completion.", "Findings ordered by severity."],
-    "Risk Guard": ["assigned", "Check destructive actions, external sending, secrets, and scope drift.", "Risk assessment and required stops."],
-    "Docs Keeper": ["assigned", `Keep ${STATE_DIR_NAME} task, todo, decisions, and audit current.`, "Updated docs summary."],
-    UX: ["assigned", "Assess user-facing workflow clarity.", "UX notes and friction points."],
-    Dependency: ["assigned", "Check dependency boundaries and avoid unapproved installs.", "Dependency impact notes."],
-    DevOps: ["assigned", "Check runnable commands, Git state, and release boundaries.", "Operational readiness notes."],
-    Auditor: ["assigned", "Compare outcomes against task_id, epoch, scope, completion conditions, and the debugging integrity gate.", "Final audit result with debug root-cause status when applicable."],
+    Intake: ["scaffolded", "Confirm project instructions, cwd, task, existing workflow state, and whether this is debug or repair work.", "Intake summary with blockers and debug classification."],
+    "Repo Mapper": ["scaffolded", "Map repository structure and likely edit boundaries.", "Repo map and source boundaries."],
+    Requirements: ["scaffolded", "Extract explicit requirements, non-goals, expected outcome, and actual failure when debugging.", "Requirement list with ambiguity notes and failure contract if applicable."],
+    Planner: ["scaffolded", "Convert requirements into an executable task sequence.", "Plan with ordered checkpoints."],
+    Architect: ["scaffolded", "Identify design constraints, integration points, and likely failure point for debug work.", "Architecture notes, risk points, and failure-path notes."],
+    Implementer: ["scaffolded", "Make scoped code or document changes when requested; for debug work, fix the root cause instead of masking failure.", "Changed files, implementation notes, and root-cause fix notes when applicable."],
+    "Test Runner": ["scaffolded", "Run allowed verification commands; for debug work, verify the intended outcome now succeeds.", "Verification output, skipped checks, and outcome evidence."],
+    Reviewer: ["scaffolded", "Review diffs for regressions, missing requirements, and log-only or fallback-only debug completion.", "Findings ordered by severity."],
+    "Risk Guard": ["scaffolded", "Check destructive actions, external sending, secrets, and scope drift.", "Risk assessment and required stops."],
+    "Docs Keeper": ["scaffolded", `Keep ${STATE_DIR_NAME} task, todo, decisions, and audit current.`, "Updated docs summary."],
+    UX: ["scaffolded", "Assess user-facing workflow clarity.", "UX notes and friction points."],
+    Dependency: ["scaffolded", "Check dependency boundaries and avoid unapproved installs.", "Dependency impact notes."],
+    DevOps: ["scaffolded", "Check runnable commands, Git state, and release boundaries.", "Operational readiness notes."],
+    Auditor: ["scaffolded", "Compare outcomes against task_id, epoch, scope, completion conditions, and the debugging integrity gate.", "Final audit result with debug root-cause status when applicable."],
   };
 
-  return `# Role Assignments
+  return `# Role Assignment Scaffold
+
+These 14 sections are stable validation and routing slots. They are not resident agents or spawned workers; actual child work begins only when a scoped assignment is issued through parent-managed subagents or runner packets.
 
 ## Debugging Integrity Gate
 
@@ -828,7 +841,7 @@ function normalizeAssignmentsDebugIntegrity(text, context = {}) {
 
 - ${DEBUG_INTEGRITY}
 - For debug or repair tasks, integration material must include expected outcome, actual failure, reproduction path, failure point, root cause, fix, and verification.`;
-  if (!next.includes(DEBUG_INTEGRITY)) next = insertAfterHeading(next, "# Role Assignments", block);
+  if (!next.includes(DEBUG_INTEGRITY)) next = insertAfterRoleScaffoldHeading(next, block);
   return normalizeAssignmentsMetacognitiveGate(next, context.workflowGate);
 }
 
@@ -913,7 +926,7 @@ function normalizeAssignmentsMetacognitiveGate(text, gate) {
     const block = `## ${METACOGNITIVE_GATE_NAME}
 
 ${renderMetacognitiveGateState(gate)}`;
-    next = insertAfterHeading(next, "# Role Assignments", block);
+    next = insertAfterRoleScaffoldHeading(next, block);
   }
   for (const role of ROLES) {
     const section = getRoleSection(next, role);
@@ -987,6 +1000,15 @@ function insertAfterHeading(text, heading, block) {
   return text.replace(pattern, `${heading}\n\n${block}`);
 }
 
+function insertAfterRoleScaffoldHeading(text, block) {
+  for (const heading of ["# Role Assignment Scaffold", "# Role Assignments"]) {
+    if (new RegExp(`^${escapeRegExp(heading)}$`, "m").test(text)) {
+      return insertAfterHeading(text, heading, block);
+    }
+  }
+  return `${text.trimEnd()}\n\n${block}\n`;
+}
+
 function insertAfterLineMatching(text, pattern, block, fallback) {
   if (pattern.test(text)) return text.replace(pattern, (line) => `${line}\n${block}`);
   return `${text.trimEnd()}\n\n${fallback}\n`;
@@ -1035,6 +1057,130 @@ function requireIntegrationPacket(args, commandContext) {
   packet.metacognitiveFields = readMetacognitiveArgs(args);
   validateIntegrationMetacognitivePacket(commandContext, packet);
   return packet;
+}
+
+function assertValidIntakeForPacket(commandContext, packet, activity) {
+  const state = resolveWorkflowState(commandContext.targetCwd);
+  const missing = validateGeneratedIntakeFiles(state.stateDir);
+  const identity = readWorkflowTaskIdentity(state.stateDir);
+  const mismatches = [];
+
+  if (!identity.taskId) mismatches.push("task.md:task_id missing");
+  else if (identity.taskId !== packet.taskId) mismatches.push(`task_id ${packet.taskId} does not match current task ${identity.taskId}`);
+  if (!identity.epoch) mismatches.push("task.md:epoch missing");
+  else if (identity.epoch !== packet.epoch) mismatches.push(`epoch ${packet.epoch} does not match current epoch ${identity.epoch}`);
+  if (!identity.scope) mismatches.push("task.md:scope missing");
+  else if (identity.scope !== packet.scope) mismatches.push(`scope ${packet.scope} does not match current scope ${identity.scope}`);
+
+  if (missing.length || mismatches.length) {
+    const details = [...missing, ...mismatches].join(", ");
+    throw new CliError(`${activity} requires current intake state before runner updates: ${details}`, 1);
+  }
+}
+
+function assertHandoffTaskMatches(state, taskId) {
+  const missing = validateGeneratedIntakeFiles(state.stateDir).filter((item) => item === "task.md" || item === "handoff.md");
+  const identity = readWorkflowTaskIdentity(state.stateDir);
+  if (missing.length || !identity.taskId) {
+    throw new CliError(`handoff requires current intake state before printing handoff: ${[...missing, "task.md:task_id missing"].join(", ")}`, 1);
+  }
+  if (identity.taskId !== taskId) {
+    throw new CliError(`handoff task_id ${taskId} does not match current task ${identity.taskId}`, 1);
+  }
+}
+
+function validateGeneratedIntakeFiles(stateDir) {
+  if (!existsSync(stateDir)) return [`missing workflow state directory: ${stateDir}`];
+  const missing = [];
+  for (const file of REQUIRED_FILES) {
+    if (!existsSync(path.join(stateDir, file))) missing.push(file);
+  }
+  return missing;
+}
+
+function readWorkflowTaskIdentity(stateDir) {
+  const taskPath = path.join(stateDir, "task.md");
+  if (!existsSync(taskPath)) return { taskId: null, epoch: null, scope: null };
+  const text = readFileSync(taskPath, "utf8");
+  return {
+    taskId: getFieldValue(text, "task_id"),
+    epoch: getFieldValue(text, "epoch"),
+    scope: getFieldValue(text, "scope"),
+  };
+}
+
+function assertMachineRunnableScope(packet, cwd) {
+  const prefixes = parseMachineScopePrefixes(packet.scope, cwd);
+  if (!prefixes) {
+    throw new CliError(
+      `run --runner codex-cli requires a machine-checkable path scope; got scope: ${packet.scope}`,
+      1,
+    );
+  }
+}
+
+function applyScopeGuard(result, packet, cwd, beforePaths) {
+  const prefixes = parseMachineScopePrefixes(packet.scope, cwd);
+  if (!prefixes) {
+    return {
+      ...result,
+      status: "failed",
+      failure: `runner scope is not machine-checkable: ${packet.scope}`,
+    };
+  }
+  if (prefixes.includes(".")) return result;
+
+  const afterPaths = readGitChangedPaths(cwd);
+  const changedAfterRunner = afterPaths.filter((changedPath) => !beforePaths.includes(changedPath));
+  const outsideScope = changedAfterRunner.filter((changedPath) => !isPathAllowedByScope(changedPath, prefixes));
+  if (!outsideScope.length) return result;
+
+  return {
+    ...result,
+    status: "failed",
+    failure: `runner changed files outside scope ${packet.scope}: ${outsideScope.join(", ")}`,
+  };
+}
+
+function parseMachineScopePrefixes(scope, cwd) {
+  const normalizedScope = String(scope || "").trim();
+  if (!normalizedScope) return null;
+  if (/^(?:\.|\.\/|repository|repo|target repo|whole repo|entire repo)$/i.test(normalizedScope)) return ["."];
+
+  const prefixes = [];
+  for (const rawToken of normalizedScope.split(/[\s,;]+/)) {
+    const token = rawToken.trim().replace(/^["'`([{]+|["'`)\]}:]+$/g, "");
+    if (!isPathLikeScopeToken(token)) continue;
+    const relative = scopeTokenToRelativePath(token, cwd);
+    if (relative) prefixes.push(relative);
+  }
+  return prefixes.length ? [...new Set(prefixes)] : null;
+}
+
+function isPathLikeScopeToken(token) {
+  if (!token || token === "." || token === "./") return Boolean(token);
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(token)) return false;
+  return token.startsWith("/")
+    || token.startsWith("./")
+    || token.startsWith("../")
+    || token.includes("/")
+    || /\.[A-Za-z0-9]+$/.test(token);
+}
+
+function scopeTokenToRelativePath(token, cwd) {
+  const cleaned = token.replace(/\\/g, "/").replace(/\/+$/g, "");
+  if (!cleaned || cleaned === ".") return ".";
+  const absolute = path.isAbsolute(cleaned) ? path.resolve(cleaned) : path.resolve(cwd, cleaned);
+  const relative = path.relative(cwd, absolute).replace(/\\/g, "/");
+  if (!relative || relative === ".") return ".";
+  if (relative.startsWith("../") || relative === "..") return null;
+  return relative;
+}
+
+function isPathAllowedByScope(changedPath, prefixes) {
+  if (prefixes.includes(".")) return true;
+  const normalized = changedPath.replace(/\\/g, "/");
+  return prefixes.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`));
 }
 
 function renderAssignmentPacket(packet) {
@@ -1222,7 +1368,7 @@ function validateRoleAssignments(text, workflowGate = { required: false }) {
     }
   }
 
-  if (missingRoles.length === 0) results.push(["ok", "14 role assignments present"]);
+  if (missingRoles.length === 0) results.push(["ok", "14 role assignment scaffold sections present"]);
   else {
     results.push(["warn", `missing role assignments: ${missingRoles.join(", ")}`]);
     fatal = true;
@@ -1799,6 +1945,33 @@ function ensureStateExcluded(state) {
   }
 }
 
+function checkStateExcluded(state) {
+  if (!state.gitRoot) return { results: [["warn", "git root unavailable for workflow state exclude check"]], fatal: true };
+  const excludePath = resolveGitExcludePath(state.gitRoot);
+  const pattern = `${STATE_DIR_NAME}/`;
+  if (!existsSync(excludePath)) {
+    return { results: [["warn", `missing git info exclude file: ${excludePath}`]], fatal: true };
+  }
+
+  const current = readFileSync(excludePath, "utf8");
+  const hasPattern = current.split(/\r?\n/).some((line) => line.trim() === pattern);
+  if (!hasPattern) {
+    return { results: [["warn", `missing ${pattern} in ${excludePath}`]], fatal: true };
+  }
+
+  const probe = `${STATE_DIR_NAME}/.ignore-probe`;
+  const check = spawnSync("git", ["-C", state.gitRoot, "check-ignore", "-q", probe], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (check.status !== 0) {
+    const detail = singleLine(check.stderr || check.error?.message || "pattern did not match");
+    return { results: [["warn", `${pattern} in ${excludePath} does not ignore ${probe}: ${detail}`]], fatal: true };
+  }
+
+  return { results: [["ok", `${pattern} ignored by git info exclude`]], fatal: false };
+}
+
 function resolveGitExcludePath(gitRoot) {
   const output = readGitOutput(gitRoot, ["rev-parse", "--git-path", "info/exclude"], "resolve git exclude path").trim();
   if (!output) return path.join(gitRoot, ".git", "info", "exclude");
@@ -1879,6 +2052,32 @@ function readGitStatus(cwd) {
   } catch (error) {
     return { ok: false, error: String(error.stderr || error.message).trim() };
   }
+}
+
+function readGitChangedPaths(cwd) {
+  try {
+    const output = execFileSync("git", ["-C", cwd, "status", "--porcelain", "--untracked-files=all"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return output
+      .split(/\r?\n/)
+      .map((line) => line.trimEnd())
+      .filter(Boolean)
+      .map((line) => parsePorcelainPath(line))
+      .filter(Boolean)
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+function parsePorcelainPath(line) {
+  const body = line.slice(3).trim();
+  if (!body) return null;
+  const renameMarker = " -> ";
+  const pathPart = body.includes(renameMarker) ? body.slice(body.lastIndexOf(renameMarker) + renameMarker.length) : body;
+  return pathPart.replace(/^"|"$/g, "").replace(/\\/g, "/");
 }
 
 function summarizeGit(output) {
