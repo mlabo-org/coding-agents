@@ -31,6 +31,26 @@ const METACOGNITIVE_PRE_GATE_NEXT =
 const NESTED_CODING_AGENTS_PREFLIGHT =
   "Parent already selected Coding Agents for this parent-managed scoped assignment; do not ask `coding-agents を使いますか？ [Y/n]` and do not start a nested Coding Agents workflow. Proceed directly within the assigned task_id/epoch/scope, but stop before scope expansion, destructive operations, external sending, commits, cache refresh, plugin activation, or unrelated edits.";
 
+const FEATURE_PROFILE_GUIDANCE = {
+  "debug.reproducer":
+    "Overlay for this assignment instance: reproduce the expected versus actual behavior and capture the smallest reliable reproduction evidence before proposing fixes.",
+  "debug.failure-boundary":
+    "Overlay for this assignment instance: isolate the failing boundary across entrypoint, data, tool, environment, and observation layers before recommending repair.",
+  "debug.hypothesis-splitter":
+    "Overlay for this assignment instance: keep competing root-cause hypotheses separate, name counterevidence, and identify the next check that narrows them.",
+  "debug.fix-verifier":
+    "Overlay for this assignment instance: verify that the intended outcome now succeeds, check for regression risk inside scope, and report skipped checks explicitly.",
+  "runner.scope-guard":
+    "Overlay for this assignment instance: enforce declared scope, detect dirty or changed paths outside scope, and stop before expanding permissions.",
+  "plugin.activation-guard":
+    "Overlay for this assignment instance: keep source validation separate from plugin cache refresh or runtime activation, and stop before activation unless explicitly in scope.",
+  "source.cache-boundary":
+    "Overlay for this assignment instance: distinguish source-of-truth files from cache/runtime/generated copies and do not patch cache as the primary edit target.",
+  "workflow.state-safety":
+    "Overlay for this assignment instance: protect .coding-agents workflow state identity, append only validated packets, and avoid tracked-state leakage.",
+};
+const DEFAULT_FEATURE_PROFILE = "none";
+
 const METACOGNITIVE_GATE_FIELDS = [
   "expected_outcome",
   "actual_result",
@@ -246,6 +266,7 @@ function assign(args) {
   console.log(`ok task_id: ${packet.taskId}`);
   console.log(`ok epoch: ${packet.epoch}`);
   console.log(`ok scope: ${packet.scope}`);
+  console.log(`ok feature_profile: ${featureProfileId(packet)}`);
 }
 
 function collect(args) {
@@ -256,6 +277,7 @@ function collect(args) {
   console.log(`ok parent-integration: ${packet.role}`);
   console.log(`ok status: ${packet.status}`);
   console.log(`ok task_id: ${packet.taskId}`);
+  console.log(`ok feature_profile: ${featureProfileId(packet)}`);
 }
 
 function run(args) {
@@ -272,6 +294,7 @@ function run(args) {
     console.log(`ok spawned: ${result.spawned}`);
     console.log(`ok exit_code: ${formatExitCode(result.exitCode)}`);
     console.log(`ok status: ${result.status}`);
+    console.log(`ok feature_profile: ${featureProfileId(packet)}`);
     if (result.summary) console.log(`ok summary: ${result.summary}`);
     if (result.status !== "completed") {
       throw new CliError(`runner ${result.runner} failed: ${result.failure}`, result.exitCode || 1);
@@ -283,6 +306,7 @@ function run(args) {
   appendRunnerEntry(commandContext, "Process Orchestration Skeletons", renderOrchestrationSkeleton(packet));
   console.log(`ok run skeleton: ${packet.role}`);
   console.log("ok spawned: false");
+  console.log(`ok feature_profile: ${featureProfileId(packet)}`);
   console.log("ok note: real process orchestration is deferred; runner recorded the scoped assignment and skeleton only");
 }
 
@@ -372,6 +396,7 @@ function normalizeCodexResult(packet, context) {
     taskId: packet.taskId,
     epoch: packet.epoch,
     scope: packet.scope,
+    featureProfile: packet.featureProfile,
     invocationCwd: packet.invocationCwd,
     targetCwd: packet.targetCwd,
     runner,
@@ -405,6 +430,7 @@ role: ${packet.role}
 task_id: ${packet.taskId}
 epoch: ${packet.epoch}
 scope: ${packet.scope}
+feature_profile: ${featureProfileId(packet)}
 invocation_cwd: ${packet.invocationCwd}
 target_cwd: ${packet.targetCwd}
 assignment: ${packet.assignment}
@@ -419,6 +445,7 @@ Boundaries:
 - Do not commit.
 - Do not edit ~/.codex/plugins/cache directly.
 - Do not claim success for unavailable, skipped, or failed checks.
+- ${renderFeatureProfilePromptGuidance(packet)}
 - ${DEBUG_INTEGRITY}
 ${renderRunnerPromptMetacognitiveGate(packet)}
 
@@ -1054,6 +1081,7 @@ function requireAssignmentPacket(args, commandContext) {
     taskId: requireIdentityArg(args.taskId, "--task-id"),
     epoch: requireIdentityArg(args.epoch, "--epoch"),
     scope: requireIdentityArg(args.scope, "--scope"),
+    featureProfile: resolveFeatureProfile(args.featureProfile),
     invocationCwd: commandContext.invocationCwd,
     targetCwd: commandContext.targetCwd,
     assignment: singleLine(requireArg(args.assignment, "--assignment")),
@@ -1075,6 +1103,7 @@ function requireIntegrationPacket(args, commandContext) {
     taskId: requireIdentityArg(args.taskId, "--task-id"),
     epoch: requireIdentityArg(args.epoch, "--epoch"),
     scope: requireIdentityArg(args.scope, "--scope"),
+    featureProfile: resolveFeatureProfile(args.featureProfile),
     invocationCwd: commandContext.invocationCwd,
     targetCwd: commandContext.targetCwd,
     findings: singleLine(args.findings || "none"),
@@ -1265,10 +1294,12 @@ function renderAssignmentPacket(packet) {
 - task_id: ${packet.taskId}
 - epoch: ${packet.epoch}
 - scope: ${packet.scope}
+- feature_profile: ${featureProfileId(packet)}
 - invocation_cwd: ${packet.invocationCwd}
 - target_cwd: ${packet.targetCwd}
 - assignment: ${packet.assignment}
 - expected_output: ${packet.expectedOutput}
+${renderFeatureProfilePacketGuidance(packet)}
 - nested_coding_agents_preflight: ${NESTED_CODING_AGENTS_PREFLIGHT}
 - debugging_integrity: ${DEBUG_INTEGRITY}
 ${renderMetacognitiveGatePacketSchema(packet.metacognitiveGate)}
@@ -1284,6 +1315,7 @@ function renderIntegrationPacket(packet) {
 - task_id: ${packet.taskId}
 - epoch: ${packet.epoch}
 - scope: ${packet.scope}
+- feature_profile: ${featureProfileId(packet)}
 - invocation_cwd: ${packet.invocationCwd}
 - target_cwd: ${packet.targetCwd}
 - findings: ${packet.findings}
@@ -1309,12 +1341,14 @@ function renderOrchestrationSkeleton(packet) {
 - task_id: ${packet.taskId}
 - epoch: ${packet.epoch}
 - scope: ${packet.scope}
+- feature_profile: ${featureProfileId(packet)}
 - invocation_cwd: ${packet.invocationCwd}
 - target_cwd: ${packet.targetCwd}
 - assignment: ${packet.assignment}
 - expected_output: ${packet.expectedOutput}
 - spawned: false
 - next: hand this assignment packet to an available subagent mechanism outside this MVP CLI
+${renderFeatureProfilePacketGuidance(packet)}
 - nested_coding_agents_preflight: ${NESTED_CODING_AGENTS_PREFLIGHT}
 - debugging_integrity: ${DEBUG_INTEGRITY}
 ${renderMetacognitiveGatePacketSchema(packet.metacognitiveGate)}
@@ -1330,6 +1364,7 @@ function renderRunnerResult(result) {
 - task_id: ${result.taskId}
 - epoch: ${result.epoch}
 - scope: ${result.scope}
+- feature_profile: ${featureProfileId(result)}
 - invocation_cwd: ${result.invocationCwd}
 - target_cwd: ${result.targetCwd}
 - runner: ${result.runner}
@@ -1505,6 +1540,10 @@ function validateRunnerPackets(text, workflowGate = { required: false }) {
       for (const error of validateIdentityField(section, field, section.split("\n")[0].replace(/^### /, ""))) {
         invalidPackets.push(error);
       }
+    }
+    const featureProfile = getFieldValue(section, "feature_profile");
+    if (featureProfile && !isKnownFeatureProfileId(featureProfile)) {
+      invalidPackets.push(`${packetLabel(section)}.feature_profile unknown (${featureProfile})`);
     }
     if (type === "assignment" || type === "process-orchestration-skeleton") {
       for (const field of ["assignment", "expected_output", "debugging_integrity", "lifecycle"]) {
@@ -2157,6 +2196,45 @@ function requireRole(value) {
   return role;
 }
 
+function resolveFeatureProfile(value) {
+  const id = value === undefined || value === null || !String(value).trim()
+    ? DEFAULT_FEATURE_PROFILE
+    : singleLine(value);
+  if (!isKnownFeatureProfileId(id)) {
+    throw new CliError(`unknown feature profile: ${id}; expected one of ${knownFeatureProfileIds().join(", ")}`, 1);
+  }
+  return {
+    id,
+    guidance: id === DEFAULT_FEATURE_PROFILE ? null : FEATURE_PROFILE_GUIDANCE[id],
+  };
+}
+
+function isKnownFeatureProfileId(id) {
+  return id === DEFAULT_FEATURE_PROFILE || Object.prototype.hasOwnProperty.call(FEATURE_PROFILE_GUIDANCE, id);
+}
+
+function knownFeatureProfileIds() {
+  return [DEFAULT_FEATURE_PROFILE, ...Object.keys(FEATURE_PROFILE_GUIDANCE)];
+}
+
+function featureProfileId(packet) {
+  return packet?.featureProfile?.id || DEFAULT_FEATURE_PROFILE;
+}
+
+function renderFeatureProfilePacketGuidance(packet) {
+  const id = featureProfileId(packet);
+  if (id === DEFAULT_FEATURE_PROFILE) return "";
+  return `- feature_profile_guidance: ${FEATURE_PROFILE_GUIDANCE[id]} This feature profile is an optional assignment overlay, not a resident agent or spawned worker.`;
+}
+
+function renderFeatureProfilePromptGuidance(packet) {
+  const id = featureProfileId(packet);
+  if (id === DEFAULT_FEATURE_PROFILE) {
+    return "feature_profile is none; use only the role, task_id, epoch, and scope guidance for this assignment.";
+  }
+  return `feature_profile ${id}: ${FEATURE_PROFILE_GUIDANCE[id]} This is an optional assignment overlay, not a resident agent or spawned worker.`;
+}
+
 function readGitStatus(cwd) {
   try {
     const output = execFileSync("git", ["-C", cwd, "status", "--short"], {
@@ -2216,9 +2294,9 @@ function printHelp() {
 
 Usage:
   node bin/coding-agents.mjs intake [--cwd <path>] [--target-cwd <path>] --task <text> --task-id <id> --epoch <epoch> --scope <scope>
-  node bin/coding-agents.mjs assign [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> --assignment <text> --expected-output <text>
-  node bin/coding-agents.mjs collect [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> --status <status> [--findings <text>] [--changed-files <text>] [--verification <text>] [--blockers <text>] [--assumptions <text>] [--next <text>] [--expected-outcome <text>] [--actual-result <text>] [--reproduction-or-evidence <text>] [--failure-point <text>] [--hypothesis-branches <text>] [--source-of-truth-boundary <text>] [--plugin-contract-boundary <text>] [--generated-artifact-boundary <text>] [--before-context-effects <text>] [--after-context-effects <text>] [--cross-feature-consequences <text>] [--root-cause <text>] [--fix-summary <text>] [--verification-evidence <text>] [--skipped-checks <text>] [--unresolved-risks <text>] [--next-investigation <text>]
-  node bin/coding-agents.mjs run|orchestrate [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> --assignment <text> --expected-output <text> [--runner codex-cli] [--timeout-ms <ms>]
+  node bin/coding-agents.mjs assign [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] --assignment <text> --expected-output <text>
+  node bin/coding-agents.mjs collect [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] --status <status> [--findings <text>] [--changed-files <text>] [--verification <text>] [--blockers <text>] [--assumptions <text>] [--next <text>] [--expected-outcome <text>] [--actual-result <text>] [--reproduction-or-evidence <text>] [--failure-point <text>] [--hypothesis-branches <text>] [--source-of-truth-boundary <text>] [--plugin-contract-boundary <text>] [--generated-artifact-boundary <text>] [--before-context-effects <text>] [--after-context-effects <text>] [--cross-feature-consequences <text>] [--root-cause <text>] [--fix-summary <text>] [--verification-evidence <text>] [--skipped-checks <text>] [--unresolved-risks <text>] [--next-investigation <text>]
+  node bin/coding-agents.mjs run|orchestrate [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] --assignment <text> --expected-output <text> [--runner codex-cli] [--timeout-ms <ms>]
   node bin/coding-agents.mjs verify-assignments [--cwd <path>] [--target-cwd <path>]
   node bin/coding-agents.mjs normalize-debugging-integrity [--cwd <path>] [--target-cwd <path>] [--execute]
   node bin/coding-agents.mjs handoff [--cwd <path>] [--target-cwd <path>] --task-id <id>
@@ -2248,6 +2326,7 @@ State:
   State writes add .coding-agents/ to .git/info/exclude; .gitignore is not edited.
   Generated assignments, handoff prompts, and runner packets carry lifecycle closure and debugging integrity rules.
   Parent-managed child-worker prompts also suppress nested Coding Agents preflight; child workers do not ask \`coding-agents を使いますか？ [Y/n]\` or start nested Coding Agents workflows inside an assigned task_id/epoch/scope.
+  Optional --feature-profile overlays provide scoped assignment guidance only. Known ids: ${knownFeatureProfileIds().join(", ")}.
   Debug or repair work must identify root cause and verify the intended outcome; log-only, fallback-only, skip-only, failure-output-only, or return-to-main-loop-only changes are not completion.
   Gate-required source-change/debug/repair/source-of-truth/plugin-contract/generated-artifact inconsistency work also carries ${METACOGNITIVE_GATE_NAME} fields and rejects completed collection without them.
 `);

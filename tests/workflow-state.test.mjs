@@ -285,6 +285,322 @@ test("intake describes fixed roles as scaffold, not resident agents", () => {
   }
 });
 
+test("feature profiles are optional overlays and do not change the fixed 14-role scaffold", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, { taskId: "profile-scaffold", epoch: "e1", scope: "README.md" });
+
+    const assigned = runCli([
+      "assign",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "profile-scaffold",
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+      "--feature-profile",
+      "workflow.state-safety",
+      "--assignment",
+      "check workflow state append safety",
+      "--expected-output",
+      "assignment packet",
+    ]);
+    assert.equal(assigned.status, 0, assigned.stderr);
+
+    const assignments = readState(repo, "assignments.md");
+    assert.equal([...assignments.matchAll(/^## (?!Debugging|Meta-Cognitive|Nested)(.+)$/gm)].length, 14);
+    assert.doesNotMatch(assignments, /workflow\.state-safety/);
+    assert.doesNotMatch(assignments, /^## workflow\.state-safety$/m);
+
+    const runner = readState(repo, "runner.md");
+    assert.match(runner, /feature_profile: workflow\.state-safety/);
+    assert.match(runner, /feature_profile_guidance: .*optional assignment overlay, not a resident agent or spawned worker/);
+    assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("valid feature profile renders in assignment, collect, and run skeleton packets", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, { taskId: "profile-render", epoch: "e1", scope: "README.md" });
+
+    const assigned = runCli([
+      "assign",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "profile-render",
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+      "--feature-profile",
+      "debug.reproducer",
+      "--assignment",
+      "capture a reproduction",
+      "--expected-output",
+      "assignment packet",
+    ]);
+    assert.equal(assigned.status, 0, assigned.stderr);
+    assert.match(assigned.stdout, /ok feature_profile: debug\.reproducer/);
+
+    const collected = runCli([
+      "collect",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "profile-render",
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+      "--feature-profile",
+      "debug.reproducer",
+      "--status",
+      "blocked",
+      "--findings",
+      "reproduction needs a fixture",
+      "--blockers",
+      "fixture is not available",
+      "--next",
+      "parent decides fixture source",
+    ]);
+    assert.equal(collected.status, 0, collected.stderr);
+    assert.match(collected.stdout, /ok feature_profile: debug\.reproducer/);
+
+    const run = runCli([
+      "orchestrate",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Test Runner",
+      "--task-id",
+      "profile-render",
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+      "--feature-profile",
+      "debug.reproducer",
+      "--assignment",
+      "record a runner skeleton",
+      "--expected-output",
+      "runner skeleton",
+    ]);
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /ok feature_profile: debug\.reproducer/);
+
+    const runner = readState(repo, "runner.md");
+    assert.match(runner, /type: assignment[\s\S]*feature_profile: debug\.reproducer/);
+    assert.match(runner, /type: parent-integration[\s\S]*feature_profile: debug\.reproducer/);
+    assert.match(runner, /type: process-orchestration-skeleton[\s\S]*feature_profile: debug\.reproducer/);
+    assert.match(runner, /feature_profile_guidance: .*reproduce the expected versus actual behavior/);
+    assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("codex-cli runner prompt and result carry the feature profile overlay", () => {
+  const repo = makeTempGitRepo();
+  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
+  try {
+    intake(repo, { taskId: "profile-runner", epoch: "e1", scope: "README.md" });
+    const fakeCodex = path.join(fakeBin, "codex");
+    writeFileSync(fakeCodex, `#!/usr/bin/env node
+const { writeFileSync } = require("node:fs");
+const args = process.argv.slice(2);
+const prompt = args[args.length - 1] || "";
+if (!prompt.includes("feature_profile: runner.scope-guard")) process.exit(7);
+if (!prompt.includes("optional assignment overlay, not a resident agent or spawned worker")) process.exit(8);
+const outputIndex = args.indexOf("--output-last-message");
+if (outputIndex !== -1) writeFileSync(args[outputIndex + 1], "runner prompt included feature_profile: runner.scope-guard\\n", "utf8");
+process.stdout.write("fake codex completed\\n");
+`, "utf8");
+    chmodSync(fakeCodex, 0o755);
+
+    const run = runCli([
+      "run",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Test Runner",
+      "--task-id",
+      "profile-runner",
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+      "--feature-profile",
+      "runner.scope-guard",
+      "--assignment",
+      "verify the prompt carries the feature profile",
+      "--expected-output",
+      "runner result",
+      "--runner",
+      "codex-cli",
+    ], {
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}`,
+      },
+    });
+
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /ok feature_profile: runner\.scope-guard/);
+    const runner = readState(repo, "runner.md");
+    assert.match(runner, /type: assignment[\s\S]*feature_profile: runner\.scope-guard/);
+    assert.match(runner, /type: process-runner-result[\s\S]*feature_profile: runner\.scope-guard/);
+    assert.match(runner, /summary: runner prompt included feature_profile: runner\.scope-guard/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(fakeBin, { recursive: true, force: true });
+  }
+});
+
+test("unknown feature profiles fail before runner state is appended", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, { taskId: "profile-reject", epoch: "e1", scope: "README.md" });
+
+    for (const args of [
+      [
+        "assign",
+        "--target-cwd",
+        repo,
+        "--role",
+        "Implementer",
+        "--task-id",
+        "profile-reject",
+        "--epoch",
+        "e1",
+        "--scope",
+        "README.md",
+        "--feature-profile",
+        "debug.unknown",
+        "--assignment",
+        "make a scoped change",
+        "--expected-output",
+        "assignment packet",
+      ],
+      [
+        "collect",
+        "--target-cwd",
+        repo,
+        "--role",
+        "Implementer",
+        "--task-id",
+        "profile-reject",
+        "--epoch",
+        "e1",
+        "--scope",
+        "README.md",
+        "--feature-profile",
+        "debug.unknown",
+        "--status",
+        "blocked",
+        "--blockers",
+        "unknown profile",
+        "--next",
+        "retry with known profile",
+      ],
+      [
+        "run",
+        "--target-cwd",
+        repo,
+        "--role",
+        "Implementer",
+        "--task-id",
+        "profile-reject",
+        "--epoch",
+        "e1",
+        "--scope",
+        "README.md",
+        "--feature-profile",
+        "debug.unknown",
+        "--assignment",
+        "make a scoped change",
+        "--expected-output",
+        "runner packet",
+      ],
+    ]) {
+      const rejected = runCli(args);
+      assert.notEqual(rejected.status, 0, `${args[0]} unexpectedly passed`);
+      assert.match(rejected.stderr, /unknown feature profile: debug\.unknown/);
+      assert.match(rejected.stderr, /debug\.reproducer/);
+      assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
+    }
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("omitted feature profile remains backwards compatible and records none", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, { taskId: "profile-none", epoch: "e1", scope: "README.md" });
+
+    const assigned = runCli([
+      "assign",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "profile-none",
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+      "--assignment",
+      "make a scoped change",
+      "--expected-output",
+      "assignment packet",
+    ]);
+    assert.equal(assigned.status, 0, assigned.stderr);
+    assert.match(assigned.stdout, /ok feature_profile: none/);
+
+    const collected = runCli([
+      "collect",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "profile-none",
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+      "--status",
+      "completed",
+      "--findings",
+      "done",
+      "--changed-files",
+      "README.md",
+      "--verification",
+      "not run",
+    ]);
+    assert.equal(collected.status, 0, collected.stderr);
+    const runner = readState(repo, "runner.md");
+    assert.match(runner, /feature_profile: none/);
+    assert.doesNotMatch(runner, /feature_profile_guidance:/);
+    assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("codex-cli runner fails when it writes outside the machine-checkable scope", () => {
   const repo = makeTempGitRepo();
   const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
