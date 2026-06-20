@@ -1210,16 +1210,10 @@ function assertNormalizableWorkflowIdentity(stateDir) {
 }
 
 function assertMachineRunnableScope(packet, cwd) {
-  if (hasNegativeScopeWording(packet.scope)) {
-    throw new CliError(
-      `run --runner codex-cli requires an affirmative machine-checkable path scope; negative or exclusion wording is not supported: ${packet.scope}`,
-      1,
-    );
-  }
   const prefixes = parseMachineScopePrefixes(packet.scope, cwd);
   if (!prefixes) {
     throw new CliError(
-      `run --runner codex-cli requires a machine-checkable path scope; got scope: ${packet.scope}`,
+      `run --runner codex-cli requires a machine-checkable path-only scope; use scope:v1 all, scope:v1 paths=<comma-separated prefixes>, or a legacy simple path-only scope; got scope: ${packet.scope}`,
       1,
     );
   }
@@ -1267,37 +1261,100 @@ function hasNegativeScopeWording(scope) {
 }
 
 function parseMachineScopePrefixes(scope, cwd) {
-  const normalizedScope = String(scope || "").trim();
+  const rawScope = String(scope || "");
+  if (/[\r\n]/.test(rawScope)) {
+    throw new CliError("run --runner codex-cli scope must be single-line; CR/LF are not allowed", 1);
+  }
+  if (hasNegativeScopeWording(rawScope)) {
+    throw new CliError(
+      `run --runner codex-cli requires an affirmative machine-checkable path scope; negative or exclusion wording is not supported: ${rawScope}`,
+      1,
+    );
+  }
+
+  const normalizedScope = rawScope.trim();
   if (!normalizedScope) return null;
+  if (/^scope:v1(?:\s+|$)/i.test(normalizedScope)) {
+    return parseScopeV1Prefixes(normalizedScope, cwd);
+  }
   if (/^(?:\.|\.\/|repository|repo|target repo|whole repo|entire repo)$/i.test(normalizedScope)) return ["."];
 
   const prefixes = [];
-  for (const rawToken of normalizedScope.split(/[\s,;]+/)) {
-    const token = rawToken.trim().replace(/^["'`([{]+|["'`)\]}:]+$/g, "");
-    if (!isPathLikeScopeToken(token)) continue;
-    const relative = scopeTokenToRelativePath(token, cwd);
-    if (relative) prefixes.push(relative);
+  const tokens = normalizedScope.split(/\s+/);
+  for (const rawToken of tokens) {
+    const token = stripScopeTokenPunctuation(rawToken);
+    if (!isLegacyPathOnlyScopeToken(token)) return null;
+    prefixes.push(scopeTokenToRelativePath(token, cwd));
   }
   return prefixes.length ? [...new Set(prefixes)] : null;
 }
 
-function isPathLikeScopeToken(token) {
+function parseScopeV1Prefixes(scope, cwd) {
+  const body = scope.replace(/^scope:v1(?:\s+|$)/i, "").trim();
+  if (body === "all") return ["."];
+  if (!body.startsWith("paths=")) {
+    throw new CliError(`invalid scope:v1 runner scope; expected "scope:v1 all" or "scope:v1 paths=<comma-separated prefixes>": ${scope}`, 1);
+  }
+
+  const pathsValue = body.slice("paths=".length);
+  if (!pathsValue) {
+    throw new CliError("invalid scope:v1 paths list: empty path item", 1);
+  }
+
+  const prefixes = pathsValue.split(",").map((item) => {
+    if (!item.trim()) {
+      throw new CliError("invalid scope:v1 paths list: empty path item", 1);
+    }
+    return scopeTokenToRelativePath(item.trim(), cwd);
+  });
+  return [...new Set(prefixes)];
+}
+
+function stripScopeTokenPunctuation(token) {
+  return token.trim().replace(/^["'`([{]+|["'`)\]}:]+$/g, "");
+}
+
+function isLegacyPathOnlyScopeToken(token) {
   if (!token || token === "." || token === "./") return Boolean(token);
   if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(token)) return false;
+  if (/[,;*?\[\]{}]/.test(token)) return false;
+  if (token.startsWith("~")) return false;
+  if (token.split(/[\\/]+/).includes("..")) return false;
   return token.startsWith("/")
     || token.startsWith("./")
-    || token.startsWith("../")
     || token.includes("/")
     || /\.[A-Za-z0-9]+$/.test(token);
 }
 
 function scopeTokenToRelativePath(token, cwd) {
-  const cleaned = token.replace(/\\/g, "/").replace(/\/+$/g, "");
-  if (!cleaned || cleaned === ".") return ".";
-  const absolute = path.isAbsolute(cleaned) ? path.resolve(cleaned) : path.resolve(cwd, cleaned);
-  const relative = path.relative(cwd, absolute).replace(/\\/g, "/");
+  const cleaned = String(token || "").replace(/\\/g, "/").replace(/\/+$/g, "");
+  if (!cleaned) {
+    throw new CliError("invalid runner scope path: empty path item", 1);
+  }
+  if (/[\r\n]/.test(cleaned)) {
+    throw new CliError("invalid runner scope path: CR/LF are not allowed", 1);
+  }
+  if (cleaned.startsWith("~")) {
+    throw new CliError(`invalid runner scope path ${cleaned}: ~ expansion is not supported`, 1);
+  }
+  if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(cleaned)) {
+    throw new CliError(`invalid runner scope path ${cleaned}: URLs or schemes are not supported`, 1);
+  }
+  if (/[,;*?\[\]{}]/.test(cleaned)) {
+    throw new CliError(`invalid runner scope path ${cleaned}: globs, wildcards, or list punctuation are not supported`, 1);
+  }
+  if (cleaned.split("/").includes("..")) {
+    throw new CliError(`invalid runner scope path ${cleaned}: .. escapes are not supported`, 1);
+  }
+  if (!cleaned || cleaned === "." || cleaned === "./") return ".";
+
+  const root = path.resolve(cwd);
+  const absolute = path.isAbsolute(cleaned) ? path.resolve(cleaned) : path.resolve(root, cleaned);
+  const relative = path.relative(root, absolute).replace(/\\/g, "/");
   if (!relative || relative === ".") return ".";
-  if (relative.startsWith("../") || relative === "..") return null;
+  if (relative.startsWith("../") || relative === ".." || path.isAbsolute(relative)) {
+    throw new CliError(`invalid runner scope path ${cleaned}: absolute paths must resolve inside target cwd`, 1);
+  }
   return relative;
 }
 
@@ -2317,38 +2374,36 @@ function readGitStatus(cwd) {
 
 function readGitChangedPaths(cwd) {
   try {
-    const output = execFileSync("git", ["-C", cwd, "status", "--porcelain", "--untracked-files=all"], {
+    const output = execFileSync("git", ["-C", cwd, "status", "--porcelain=v1", "-z", "--untracked-files=all"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
-    return output
-      .split(/\r?\n/)
-      .map((line) => line.trimEnd())
-      .filter(Boolean)
-      .flatMap((line) => parsePorcelainPaths(line))
-      .filter(Boolean)
-      .sort();
+    return parsePorcelainZPaths(output).sort();
   } catch {
     return [];
   }
 }
 
-function parsePorcelainPaths(line) {
-  const body = line.slice(3).trim();
-  if (!body) return [];
-  const renameMarker = " -> ";
-  if (body.includes(renameMarker)) {
-    const markerIndex = body.lastIndexOf(renameMarker);
-    return [
-      normalizePorcelainPath(body.slice(0, markerIndex)),
-      normalizePorcelainPath(body.slice(markerIndex + renameMarker.length)),
-    ];
+function parsePorcelainZPaths(output) {
+  const records = output.split("\0").filter(Boolean);
+  const paths = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (record.length < 4) continue;
+    const status = record.slice(0, 2);
+    const statusPath = normalizePorcelainPath(record.slice(3));
+    if (statusPath) paths.push(statusPath);
+    if (/[RC]/.test(status)) {
+      const sourcePath = normalizePorcelainPath(records[index + 1] || "");
+      if (sourcePath) paths.push(sourcePath);
+      index += 1;
+    }
   }
-  return [normalizePorcelainPath(body)];
+  return [...new Set(paths)];
 }
 
 function normalizePorcelainPath(pathPart) {
-  return pathPart.trim().replace(/^"|"$/g, "").replace(/\\/g, "/");
+  return pathPart.replace(/\\/g, "/");
 }
 
 function summarizeGit(output) {
@@ -2398,6 +2453,10 @@ State:
   Optional --work-type is semantic command metadata. Known ids: ${knownWorkTypeIds().join(", ")}.
   --work-type auto preserves keyword/path inference. --work-type source-change and --work-type debug force the metacognitive gate for that command.
   --work-type documentation suppresses keyword/path gate inference for that command only; it does not replace debug/root-cause gates and cannot downgrade existing gate-required workflow state.
+  With --runner codex-cli, --scope must be machine-checkable before runner.md is appended or the process launches.
+  Runner machine scope grammar is "scope:v1 all" for the whole repo, or "scope:v1 paths=README.md,bin/coding-agents.mjs,tests/" for comma-separated repo-relative prefixes.
+  Absolute paths in "scope:v1 paths=" are accepted only when they resolve inside the target cwd and are normalized to repo-relative prefixes.
+  Legacy runner scopes remain available only for simple path-only values such as "README.md", "allowed/", "bin/coding-agents.mjs tests/workflow-state.test.mjs", ".", "repo", and "whole repo".
   Debug or repair work must identify root cause and verify the intended outcome; log-only, fallback-only, skip-only, failure-output-only, or return-to-main-loop-only changes are not completion.
   Gate-required source-change/debug/repair/source-of-truth/plugin-contract/generated-artifact inconsistency work also carries ${METACOGNITIVE_GATE_NAME} fields and rejects completed collection without them.
 `);

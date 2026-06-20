@@ -864,6 +864,298 @@ process.stdout.write("fake codex completed\\n");
   }
 });
 
+test("codex-cli runner accepts explicit scope:v1 paths grammar", () => {
+  const repo = makeTempGitRepo();
+  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
+  try {
+    const scope = `scope:v1 paths=README.md,${path.join(repo, "bin/coding-agents.mjs")},tests/`;
+    intake(repo, { taskId: "runner-v1-paths", epoch: "e1", scope, workType: "documentation" });
+    installFakeCodex(fakeBin, "fake codex completed\\n");
+
+    const run = runCli([
+      "run",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "runner-v1-paths",
+      "--epoch",
+      "e1",
+      "--scope",
+      scope,
+      "--work-type",
+      "documentation",
+      "--assignment",
+      "validate explicit machine paths grammar",
+      "--expected-output",
+      "runner result",
+      "--runner",
+      "codex-cli",
+    ], {
+      env: pathWithFakeCodex(fakeBin),
+    });
+
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /ok runner: codex-cli/);
+    assert.match(readState(repo, "runner.md"), /type: process-runner-result/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(fakeBin, { recursive: true, force: true });
+  }
+});
+
+test("codex-cli runner accepts explicit scope:v1 all grammar as whole repo", () => {
+  const repo = makeTempGitRepo();
+  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
+  try {
+    const scope = "scope:v1 all";
+    intake(repo, { taskId: "runner-v1-all", epoch: "e1", scope });
+    installFakeCodex(fakeBin, "fake codex completed\\n", 'writeFileSync("anywhere.txt", "whole repo allowed\\n", "utf8");');
+
+    const run = runCli([
+      "run",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "runner-v1-all",
+      "--epoch",
+      "e1",
+      "--scope",
+      scope,
+      "--assignment",
+      "validate whole-repo machine grammar",
+      "--expected-output",
+      "runner result",
+      "--runner",
+      "codex-cli",
+    ], {
+      env: pathWithFakeCodex(fakeBin),
+    });
+
+    assert.equal(run.status, 0, run.stderr);
+    assert.equal(readFileSync(path.join(repo, "anywhere.txt"), "utf8"), "whole repo allowed\n");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(fakeBin, { recursive: true, force: true });
+  }
+});
+
+test("codex-cli runner rejects glob scope before appending or launching", () => {
+  const repo = makeTempGitRepo();
+  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
+  try {
+    const scope = "scope:v1 paths=*.md";
+    intake(repo, { taskId: "runner-glob-reject", epoch: "e1", scope });
+    installFakeCodex(fakeBin, "fake codex completed\\n", 'writeFileSync("launched.txt", "runner launched\\n", "utf8");');
+
+    const run = runCli([
+      "run",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "runner-glob-reject",
+      "--epoch",
+      "e1",
+      "--scope",
+      scope,
+      "--assignment",
+      "glob scope should fail before launch",
+      "--expected-output",
+      "runner result",
+      "--runner",
+      "codex-cli",
+    ], {
+      env: pathWithFakeCodex(fakeBin),
+    });
+
+    assert.notEqual(run.status, 0);
+    assert.match(run.stderr, /globs, wildcards, or list punctuation are not supported/);
+    assert.equal(existsSync(path.join(repo, "launched.txt")), false);
+    assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(fakeBin, { recursive: true, force: true });
+  }
+});
+
+test("codex-cli runner rejects outside absolute and dot-dot scope before launch", () => {
+  const repo = makeTempGitRepo();
+  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
+  try {
+    installFakeCodex(fakeBin, "fake codex completed\\n", 'writeFileSync("launched.txt", "runner launched\\n", "utf8");');
+
+    for (const [taskId, scope, expected] of [
+      ["runner-absolute-reject", `scope:v1 paths=${path.join(os.tmpdir(), "outside-coding-agents.txt")}`, /absolute paths must resolve inside target cwd/],
+      ["runner-dotdot-reject", "scope:v1 paths=../outside.txt", /\.\. escapes are not supported/],
+    ]) {
+      intake(repo, { taskId, epoch: "e1", scope, workType: "documentation" });
+      const run = runCli([
+        "run",
+        "--target-cwd",
+        repo,
+        "--role",
+        "Implementer",
+        "--task-id",
+        taskId,
+        "--epoch",
+        "e1",
+        "--scope",
+        scope,
+        "--assignment",
+        "invalid scope should fail before launch",
+        "--expected-output",
+        "runner result",
+        "--runner",
+        "codex-cli",
+      ], {
+        env: pathWithFakeCodex(fakeBin),
+      });
+
+      assert.notEqual(run.status, 0, `${scope} unexpectedly passed`);
+      assert.match(run.stderr, expected);
+      assert.equal(existsSync(path.join(repo, "launched.txt")), false);
+      assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
+    }
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(fakeBin, { recursive: true, force: true });
+  }
+});
+
+test("codex-cli runner preserves legacy simple path-only scopes", () => {
+  const repo = makeTempGitRepo();
+  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
+  try {
+    installFakeCodex(fakeBin, "fake codex completed\\n");
+
+    for (const [index, scope] of [
+      "README.md",
+      "allowed/",
+      "bin/coding-agents.mjs tests/workflow-state.test.mjs",
+      ".",
+      "repo",
+      "whole repo",
+    ].entries()) {
+      const taskId = `runner-legacy-scope-${index}`;
+      intake(repo, { taskId, epoch: "e1", scope, workType: "documentation" });
+      const run = runCli([
+        "run",
+        "--target-cwd",
+        repo,
+        "--role",
+        "Implementer",
+        "--task-id",
+        taskId,
+        "--epoch",
+        "e1",
+        "--scope",
+        scope,
+        "--work-type",
+        "documentation",
+        "--assignment",
+        "validate legacy simple path scope",
+        "--expected-output",
+        "runner result",
+        "--runner",
+        "codex-cli",
+      ], {
+        env: pathWithFakeCodex(fakeBin),
+      });
+
+      assert.equal(run.status, 0, `${scope}: ${run.stderr}`);
+      assert.match(run.stdout, /ok runner: codex-cli/);
+    }
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(fakeBin, { recursive: true, force: true });
+  }
+});
+
+test("codex-cli runner rejects ambiguous legacy prose before appending or launching", () => {
+  const repo = makeTempGitRepo();
+  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
+  try {
+    const scope = "please edit README.md";
+    intake(repo, { taskId: "runner-prose-reject", epoch: "e1", scope });
+    installFakeCodex(fakeBin, "fake codex completed\\n", 'writeFileSync("launched.txt", "runner launched\\n", "utf8");');
+
+    const run = runCli([
+      "run",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "runner-prose-reject",
+      "--epoch",
+      "e1",
+      "--scope",
+      scope,
+      "--assignment",
+      "ambiguous prose should fail before launch",
+      "--expected-output",
+      "runner result",
+      "--runner",
+      "codex-cli",
+    ], {
+      env: pathWithFakeCodex(fakeBin),
+    });
+
+    assert.notEqual(run.status, 0);
+    assert.match(run.stderr, /requires a machine-checkable path-only scope/);
+    assert.equal(existsSync(path.join(repo, "launched.txt")), false);
+    assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(fakeBin, { recursive: true, force: true });
+  }
+});
+
+test("codex-cli runner rejects legacy list punctuation before appending or launching", () => {
+  const repo = makeTempGitRepo();
+  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
+  try {
+    const scope = "README.md;tests/";
+    intake(repo, { taskId: "runner-legacy-punctuation-reject", epoch: "e1", scope });
+    installFakeCodex(fakeBin, "fake codex completed\\n", 'writeFileSync("launched.txt", "runner launched\\n", "utf8");');
+
+    const run = runCli([
+      "run",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "runner-legacy-punctuation-reject",
+      "--epoch",
+      "e1",
+      "--scope",
+      scope,
+      "--assignment",
+      "legacy punctuation should fail before launch",
+      "--expected-output",
+      "runner result",
+      "--runner",
+      "codex-cli",
+    ], {
+      env: pathWithFakeCodex(fakeBin),
+    });
+
+    assert.notEqual(run.status, 0);
+    assert.match(run.stderr, /requires a machine-checkable path-only scope/);
+    assert.equal(existsSync(path.join(repo, "launched.txt")), false);
+    assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(fakeBin, { recursive: true, force: true });
+  }
+});
+
 test("codex-cli runner scope guard treats git rename source and destination as changed paths", () => {
   const repo = makeTempGitRepo();
   const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
@@ -910,6 +1202,54 @@ process.stdout.write("fake codex renamed\\n");
     const runner = readState(repo, "runner.md");
     assert.match(runner, /type: process-runner-result/);
     assert.match(runner, /failure: runner changed files outside scope allowed\/: outside\.txt/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(fakeBin, { recursive: true, force: true });
+  }
+});
+
+test("codex-cli runner scope guard handles rename paths with spaces", () => {
+  const repo = makeTempGitRepo();
+  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
+  try {
+    commitFile(repo, "outside old name.txt", "tracked outside\n");
+    intake(repo, { taskId: "runner-rename-spaces", epoch: "e1", scope: "allowed/" });
+    const fakeCodex = path.join(fakeBin, "codex");
+    writeFileSync(fakeCodex, `#!/usr/bin/env node
+const { execFileSync } = require("node:child_process");
+const { mkdirSync } = require("node:fs");
+mkdirSync("allowed", { recursive: true });
+execFileSync("git", ["mv", "outside old name.txt", "allowed/new name.txt"]);
+process.stdout.write("fake codex renamed\\n");
+`, "utf8");
+    chmodSync(fakeCodex, 0o755);
+
+    const run = runCli([
+      "run",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "runner-rename-spaces",
+      "--epoch",
+      "e1",
+      "--scope",
+      "allowed/",
+      "--assignment",
+      "write only under allowed",
+      "--expected-output",
+      "runner result",
+      "--runner",
+      "codex-cli",
+    ], {
+      env: pathWithFakeCodex(fakeBin),
+    });
+
+    assert.notEqual(run.status, 0);
+    assert.match(run.stderr, /outside scope allowed\/: outside old name\.txt/);
+    const runner = readState(repo, "runner.md");
+    assert.match(runner, /failure: runner changed files outside scope allowed\/: outside old name\.txt/);
   } finally {
     rmSync(repo, { recursive: true, force: true });
     rmSync(fakeBin, { recursive: true, force: true });
@@ -974,7 +1314,7 @@ test("codex-cli runner validates runner name and timeout before appending assign
 });
 
 function intake(repo, options) {
-  const result = runCli([
+  const args = [
     "intake",
     "--target-cwd",
     repo,
@@ -986,7 +1326,9 @@ function intake(repo, options) {
     options.epoch,
     "--scope",
     options.scope,
-  ]);
+  ];
+  if (options.workType) args.splice(3, 0, "--work-type", options.workType);
+  const result = runCli(args);
   assert.equal(result.status, 0, result.stderr);
 }
 
@@ -1004,6 +1346,26 @@ function commitFile(repo, file, contents) {
   assert.equal(spawnSync("git", ["add", file], { cwd: repo, encoding: "utf8" }).status, 0);
   const commit = spawnSync("git", ["commit", "-m", `track ${file}`], { cwd: repo, encoding: "utf8" });
   assert.equal(commit.status, 0, commit.stderr);
+}
+
+function installFakeCodex(fakeBin, message, extraBody = "") {
+  const fakeCodex = path.join(fakeBin, "codex");
+  writeFileSync(fakeCodex, `#!/usr/bin/env node
+const { writeFileSync } = require("node:fs");
+const args = process.argv.slice(2);
+const outputIndex = args.indexOf("--output-last-message");
+if (outputIndex !== -1) writeFileSync(args[outputIndex + 1], "${message}", "utf8");
+${extraBody}
+process.stdout.write("fake codex completed\\n");
+`, "utf8");
+  chmodSync(fakeCodex, 0o755);
+}
+
+function pathWithFakeCodex(fakeBin) {
+  return {
+    ...process.env,
+    PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}`,
+  };
 }
 
 function runCli(args, options = {}) {

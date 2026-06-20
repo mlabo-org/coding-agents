@@ -113,6 +113,13 @@ Use the source CLI when the user wants to test source-tree behavior before plugi
    Apply only after confirming the target state directory:
    `node /Users/suzukimakoto/plugins/coding-agents/bin/coding-agents.mjs normalize-debugging-integrity --target-cwd <jobsite> --execute`.
 9. For `assign`, `collect`, `run`, or `orchestrate`, record operational packets in the jobsite repository's `.coding-agents/runner.md`. Use `--feature-profile <id>` only as an optional scoped overlay for that assignment instance, and keep missing profiles as `feature_profile: none`. Use `--work-type <id>` only as semantic command metadata for gate classification, and keep missing work types as `work_type: auto`.
+   When `run --runner codex-cli` is used, treat `--scope` as runner machine input:
+   - Stop before appending `.coding-agents/runner.md` or launching the runner when `--scope` is empty, ambiguous prose, negative/exclusion wording, or otherwise not machine-checkable.
+   - Use quoted `--scope "scope:v1 all"` for the whole repo.
+   - Use quoted `--scope "scope:v1 paths=README.md,bin/coding-agents.mjs,tests/"` for an affirmative comma-separated repo-relative prefix list.
+   - Accept absolute paths only when they resolve inside the target cwd, then normalize them to repo-relative prefixes.
+   - Preserve legacy runner compatibility only for simple path-only values such as `README.md`, `allowed/`, `bin/coding-agents.mjs tests/workflow-state.test.mjs`, plus whole-repo aliases `.`, `repo`, and `whole repo`.
+   - Keep broader human prose scopes for intake, assign, and collect rather than runner execution.
 10. Ensure generated assignments, runner prompts, runner packets, and handoff material carry the nested Coding Agents preflight suppression rule, lifecycle rule, debugging integrity gate, and Meta-Cognitive Debug/Repair Gate when it fires: child workers do not ask `coding-agents を使いますか？ [Y/n]` or start nested Coding Agents workflows inside a parent-managed scoped assignment; subagents return concise integration material, stop waiting for more work, are closed or retired promptly when no longer needed, do not claim debug completion through log-only, fallback-only, skip-only, or return-to-main-loop-only changes, and include context-impact inspection plus cross-feature checks for gate-required work.
 11. Treat marketplace registration, `~/.codex/plugins/cache/` refresh, and Codex restart/new-thread activation as separate work unless the user explicitly includes them.
 
