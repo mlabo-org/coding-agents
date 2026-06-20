@@ -241,6 +241,59 @@ test("validation rejects corrupted workflow state with injected identity fields"
   }
 });
 
+test("workflow identity ignores task body fenced field-looking bullets", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, {
+      taskId: "task-fence",
+      epoch: "e1",
+      scope: "README.md",
+      task: `Investigate a user-supplied Markdown sample.
+
+\`\`\`markdown
+- task_id: fake-task
+- epoch: fake-epoch
+- scope: fake-scope
+\`\`\`
+
+The fenced sample is task prose, not workflow identity.`,
+    });
+
+    const doctor = runCli(["doctor", "--target-cwd", repo]);
+    assert.equal(doctor.status, 0, doctor.stdout + doctor.stderr);
+    assert.doesNotMatch(doctor.stdout, /duplicated|fake-task|fake-epoch|fake-scope/);
+
+    const handoff = runCli(["handoff", "--target-cwd", repo, "--task-id", "task-fence"]);
+    assert.equal(handoff.status, 0, handoff.stderr);
+
+    const fakeHandoff = runCli(["handoff", "--target-cwd", repo, "--task-id", "fake-task"]);
+    assert.notEqual(fakeHandoff.status, 0);
+    assert.match(fakeHandoff.stderr, /does not match current task task-fence/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("assignment validation does not accept fenced fake identity fields", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, { taskId: "assignment-fence", epoch: "e1", scope: "README.md" });
+    const assignmentsPath = path.join(repo, ".coding-agents", "assignments.md");
+    const assignments = readFileSync(assignmentsPath, "utf8");
+    const corrupted = assignments.replace(
+      /(## Implementer[\s\S]*?)- task_id: assignment-fence\n/,
+      "$1```markdown\n- task_id: assignment-fence\n```\n",
+    );
+    writeFileSync(assignmentsPath, corrupted, "utf8");
+
+    const verify = runCli(["verify-assignments", "--target-cwd", repo]);
+    assert.notEqual(verify.status, 0);
+    assert.match(verify.stdout, /Implementer\.task_id/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("doctor verifies the target git info exclude without mutating it", () => {
   const repo = makeTempGitRepo();
   try {
@@ -721,6 +774,114 @@ test("doctor still reports duplicate identity fields inside a modern runner pack
     const doctor = runCli(["doctor", "--target-cwd", repo]);
     assert.notEqual(doctor.status, 0);
     assert.match(doctor.stdout, /task_id duplicated/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("runner validation ignores fenced field-looking bullets inside modern packets", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, { taskId: "runner-fence", epoch: "e1", scope: "README.md" });
+    const runner = `${modernRunnerPacket("runner-fence")}
+\`\`\`markdown
+- task_id: fake-runner-task
+- epoch: fake-runner-epoch
+- scope: fake-runner-scope
+\`\`\`
+`;
+    writeFileSync(path.join(repo, ".coding-agents", "runner.md"), runner, "utf8");
+
+    const doctor = runCli(["doctor", "--target-cwd", repo]);
+    assert.equal(doctor.status, 0, doctor.stdout + doctor.stderr);
+    assert.doesNotMatch(doctor.stdout, /duplicated|fake-runner/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("runner validation does not accept fenced fake identity for missing structural fields", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, { taskId: "runner-missing-fence", epoch: "e1", scope: "README.md" });
+    const runner = `${modernRunnerPacket("runner-missing-fence").replace("- task_id: runner-missing-fence\n", "")}
+\`\`\`markdown
+- task_id: runner-missing-fence
+\`\`\`
+`;
+    writeFileSync(path.join(repo, ".coding-agents", "runner.md"), runner, "utf8");
+
+    const doctor = runCli(["doctor", "--target-cwd", repo]);
+    assert.notEqual(doctor.status, 0);
+    assert.match(doctor.stdout, /task_id/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("normalize runner debugging integrity stops modern packets before legacy runner packets", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, { taskId: "normalize-legacy-boundary", epoch: "e1", scope: "README.md" });
+    const runner = modernPacketFollowedByLegacyRunnerPacket("normalize-legacy-boundary")
+      .replace("- debugging_integrity: debug work requires root cause and verification\n", "");
+    writeFileSync(path.join(repo, ".coding-agents", "runner.md"), runner, "utf8");
+
+    const normalized = runCli(["normalize-debugging-integrity", "--target-cwd", repo, "--execute"]);
+    assert.equal(normalized.status, 0, normalized.stderr);
+    assert.match(normalized.stdout, /Updated: runner\.md/);
+
+    const nextRunner = readState(repo, "runner.md");
+    const modernSection = nextRunner.slice(0, nextRunner.indexOf("## runner packet: legacy-import"));
+    assert.match(modernSection, /- debugging_integrity: For debug or repair work, identify root cause/);
+
+    const doctor = runCli(["doctor", "--target-cwd", repo]);
+    assert.equal(doctor.status, 0, doctor.stdout + doctor.stderr);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("normalize runner metacognitive gate does not accept packet fields as preamble", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, {
+      taskId: "normalize-runner-preamble",
+      epoch: "e1",
+      scope: "bin/coding-agents.mjs",
+      workType: "source-change",
+    });
+    const assigned = runCli([
+      "assign",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "normalize-runner-preamble",
+      "--epoch",
+      "e1",
+      "--scope",
+      "bin/coding-agents.mjs",
+      "--work-type",
+      "source-change",
+      "--assignment",
+      "change source parser behavior",
+      "--expected-output",
+      "source patch and tests",
+    ]);
+    assert.equal(assigned.status, 0, assigned.stderr);
+
+    const runner = readState(repo, "runner.md");
+    assert.doesNotMatch(runner, /^## Meta-Cognitive Debug\/Repair Gate$/m);
+    assert.match(runner, /^- metacognitive_gate_required: true$/m);
+
+    const normalized = runCli(["normalize-debugging-integrity", "--target-cwd", repo, "--execute"]);
+    assert.equal(normalized.status, 0, normalized.stderr);
+    assert.match(normalized.stdout, /Updated: runner\.md/);
+
+    const nextRunner = readState(repo, "runner.md");
+    assert.match(nextRunner, /^## Meta-Cognitive Debug\/Repair Gate$/m);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -1349,7 +1510,7 @@ function intake(repo, options) {
     "--target-cwd",
     repo,
     "--task",
-    "Add a focused workflow-state safety improvement",
+    options.task || "Add a focused workflow-state safety improvement",
     "--task-id",
     options.taskId,
     "--epoch",

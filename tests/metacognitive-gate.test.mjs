@@ -718,6 +718,53 @@ process.stdout.write("fake codex completed\\n");
   }
 });
 
+test("doctor does not accept fenced fake metacognitive result fields", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intakeGateRequired(repo, "meta-fence");
+    const runner = `${completionSynonymRunner("meta-fence", "completed")}
+\`\`\`markdown
+${metacognitiveEvidenceLines()}
+\`\`\`
+`;
+    writeFileSync(path.join(repo, ".coding-agents", "runner.md"), runner, "utf8");
+
+    const doctor = runCli(["doctor", "--target-cwd", repo]);
+    assert.notEqual(doctor.status, 0);
+    assert.match(doctor.stdout, /missing or incomplete metacognitive runner packet fields/);
+    assert.match(doctor.stdout, /expected_outcome/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("verify-assignments does not accept fenced fake metacognitive gate heading", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intakeGateRequired(repo, "meta-fenced-heading");
+    const assignmentsPath = path.join(repo, ".coding-agents", "assignments.md");
+    const assignments = readFileSync(assignmentsPath, "utf8");
+    const corrupted = `${stripMetacognitiveLines(assignments)}
+
+\`\`\`markdown
+## Meta-Cognitive Debug/Repair Gate
+- metacognitive_gate_required: true
+- metacognitive_gate_name: Meta-Cognitive Debug/Repair Gate
+- metacognitive_gate_triggers: source/test/config path scope
+- metacognitive_gate_fields: ${META_ARGS.filter((_, index) => index % 2 === 0).map((flag) => flag.slice(2).replaceAll("-", "_")).join(", ")}
+- metacognitive_gate_contract: fenced text is prose, not the structural assignments gate
+\`\`\`
+`;
+    writeFileSync(assignmentsPath, corrupted, "utf8");
+
+    const verify = runCli(["verify-assignments", "--target-cwd", repo]);
+    assert.notEqual(verify.status, 0);
+    assert.match(verify.stdout, /metacognitive gate missing from assignments|metacognitive assignment fields/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("normalization recovers stale pre-gate state without faking completed evidence", () => {
   const repo = makeTempGitRepo();
   try {
@@ -1061,6 +1108,35 @@ function metacognitiveResultText(value) {
     result.push(`- ${META_ARGS[i].slice(2).replaceAll("-", "_")}: ${value}`);
   }
   return result.join("\n");
+}
+
+function metacognitiveEvidenceLines() {
+  const values = {
+    expected_outcome: "doctor command should reject missing structural metacognitive fields in runner.md",
+    actual_result: "runner.md fenced code contains fake fields but structural packet omits them",
+    reproduction_or_evidence: "node --test tests/metacognitive-gate.test.mjs reproduced runner.md fenced fields",
+    failure_point: "readMetacognitiveFieldsFromSection previously read fenced runner.md body fields",
+    hypothesis_branches: "source parser versus generated runner state versus verification criteria were checked",
+    source_of_truth_boundary: "source parser in bin/coding-agents.mjs owns structural field extraction",
+    plugin_contract_boundary: "plugin cache activation is outside scope; source CLI test covers runner validation",
+    generated_artifact_boundary: "generated runner.md packet is artifact under .coding-agents and fenced body is not structural",
+    before_context_effects: "before fix doctor could accept fake fenced fields and miss packet corruption",
+    after_context_effects: "after fix doctor ignores fenced fields and reports missing structural evidence",
+    cross_feature_consequences: "runner validation and normalize-debugging-integrity share structural packet parsing behavior",
+    root_cause: "field parser scanned all runner.md text including fenced code blocks",
+    fix_summary: "bin/coding-agents.mjs now reads only structural bullet field blocks",
+    verification_evidence: "node --test tests/metacognitive-gate.test.mjs validates fenced fake fields are rejected",
+    skipped_checks: "full plugin cache activation skipped because source CLI behavior is the target",
+    unresolved_risks: "manual exotic Markdown field layouts remain outside generated format coverage",
+    next_investigation: "run node --test tests/*.test.mjs after integration",
+  };
+  return META_ARGS
+    .filter((_, index) => index % 2 === 0)
+    .map((flag) => {
+      const field = flag.slice(2).replaceAll("-", "_");
+      return `- ${field}: ${values[field]}`;
+    })
+    .join("\n");
 }
 
 function staleActivePreamble(file) {

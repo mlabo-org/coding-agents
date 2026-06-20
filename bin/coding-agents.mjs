@@ -950,17 +950,26 @@ function normalizeRunnerDebugIntegrity(text, context = {}) {
     );
   }
 
-  const firstPacket = next.search(/^### /m);
-  if (firstPacket === -1) return normalizeDocumentMetacognitiveGate(next, context.workflowGate);
+  const packets = getModernRunnerPacketSections(next);
+  if (!packets.length) return normalizeDocumentMetacognitiveGate(next, context.workflowGate);
+  const firstPacket = next.indexOf(packets[0]);
   const preamble = next.slice(0, firstPacket);
-  const packets = next.slice(firstPacket).split(/^### /m).filter(Boolean).map((packet) => `### ${packet}`);
-  const normalizedPreamble = validateMetacognitiveGateText(next).valid
+  let cursor = firstPacket;
+  const normalizedPreamble = validateMetacognitiveGateText(preamble).valid
     ? preamble
     : normalizeDocumentMetacognitiveGate(preamble, context.workflowGate);
-  return normalizedPreamble + packets.map((packet) => normalizeRunnerPacketMetacognitiveGate(
-    normalizeRunnerPacketDebugIntegrity(packet),
-    context.workflowGate,
-  )).join("");
+  let normalizedPackets = "";
+  for (const packet of packets) {
+    const packetStart = next.indexOf(packet, cursor);
+    if (packetStart === -1) continue;
+    normalizedPackets += next.slice(cursor, packetStart);
+    normalizedPackets += normalizeRunnerPacketMetacognitiveGate(
+      normalizeRunnerPacketDebugIntegrity(packet),
+      context.workflowGate,
+    );
+    cursor = packetStart + packet.length;
+  }
+  return normalizedPreamble + normalizedPackets + next.slice(cursor);
 }
 
 function normalizeRunnerPacketDebugIntegrity(section) {
@@ -1753,8 +1762,9 @@ function readWorkflowMetacognitiveContext(stateDir) {
   const scope = identity.scope;
   const task = getFieldValue(text, "task");
   const workType = resolveWorkType(getFieldValue(text, "work_type") || DEFAULT_WORK_TYPE);
-  const declaredRequired = getFieldValue(text, "metacognitive_gate_required") === "true";
-  const declaredTriggers = splitList(getFieldValue(text, "metacognitive_gate_triggers")).filter((item) => item !== "none");
+  const gateSection = getMetacognitiveGateFieldSection(text);
+  const declaredRequired = getFieldValue(gateSection, "metacognitive_gate_required") === "true";
+  const declaredTriggers = splitList(getFieldValue(gateSection, "metacognitive_gate_triggers")).filter((item) => item !== "none");
   const classified = classifyMetacognitiveGate({ task, scope }, workType);
   const gate = mergeMetacognitiveGates(
     classified,
@@ -1865,9 +1875,10 @@ function readMetacognitiveArgs(args) {
 }
 
 function validateMetacognitiveGateText(text) {
+  const section = getMetacognitiveGateFieldSection(text);
   const missing = [];
-  if (getFieldValue(text, "metacognitive_gate_required") !== "true") missing.push("metacognitive_gate_required");
-  const fieldList = splitList(getFieldValue(text, "metacognitive_gate_fields"));
+  if (getFieldValue(section, "metacognitive_gate_required") !== "true") missing.push("metacognitive_gate_required");
+  const fieldList = splitList(getFieldValue(section, "metacognitive_gate_fields"));
   if (!fieldList.length) missing.push("metacognitive_gate_fields");
   else {
     for (const field of METACOGNITIVE_GATE_FIELDS) {
@@ -2033,9 +2044,8 @@ function readMetacognitiveFieldsFromSection(section) {
 function extractMetacognitiveFields(text) {
   const fields = {};
   for (const field of METACOGNITIVE_GATE_FIELDS) {
-    const pattern = new RegExp(`(?:^|\\n)\\s*(?:[-*]\\s*)?${escapeRegExp(field)}:\\s*(.+)`, "i");
-    const match = pattern.exec(text || "");
-    if (match) fields[field] = singleLine(match[1]);
+    const value = getFieldValue(text, field);
+    if (value) fields[field] = value;
   }
   return fields;
 }
@@ -2505,12 +2515,74 @@ function getFieldValue(section, field) {
 
 function getFieldValues(section, field) {
   const values = [];
-  const pattern = new RegExp(`^- ${escapeRegExp(field)}:\\s*(.*)$`, "gm");
-  for (const match of String(section || "").matchAll(pattern)) {
-    const value = match[1].trim();
+  const block = getStructuralFieldBlocks(section)[0] || [];
+  for (const entry of block) {
+    if (entry.field !== field) continue;
+    const value = entry.value.trim();
     if (value) values.push(value);
   }
   return values;
+}
+
+function getStructuralFieldBlocks(section) {
+  const blocks = [];
+  let current = [];
+  let inFence = false;
+  for (const line of String(section || "").split(/\r?\n/)) {
+    if (/^\s*(?:```|~~~)/.test(line)) {
+      if (current.length) {
+        blocks.push(current);
+        current = [];
+      }
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    if (line.trim() === "") continue;
+    const match = /^- ([A-Za-z0-9_][A-Za-z0-9_.-]*):\s*(.*)$/.exec(line);
+    if (match) {
+      current.push({ field: match[1], value: match[2] });
+      continue;
+    }
+    if (current.length) {
+      blocks.push(current);
+      current = [];
+    }
+  }
+  if (current.length) blocks.push(current);
+  return blocks;
+}
+
+function getMetacognitiveGateFieldSection(text) {
+  const content = String(text || "");
+  const headingPattern = new RegExp(`^(?:#{1,6}\\s+)?${escapeRegExp(METACOGNITIVE_GATE_NAME)}:?\\s*$`);
+  const heading = findMarkdownLineOutsideFences(content, (line) => headingPattern.test(line));
+  if (!heading) return content;
+  const nextHeading = findMarkdownLineOutsideFences(
+    content,
+    (line) => /^#{1,6}\s+/.test(line),
+    heading.end,
+  );
+  return content.slice(heading.start, nextHeading ? nextHeading.start : content.length);
+}
+
+function findMarkdownLineOutsideFences(content, predicate, from = 0) {
+  let inFence = false;
+  const linePattern = /^.*(?:\r?\n|$)/gm;
+  for (const match of content.matchAll(linePattern)) {
+    if (match[0] === "") continue;
+    const start = match.index;
+    const rawLine = match[0];
+    const line = rawLine.replace(/\r?\n$/, "");
+    const end = start + line.length;
+    if (/^\s*(?:```|~~~)/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (end < from) continue;
+    if (!inFence && start >= from && predicate(line)) return { start, end };
+  }
+  return null;
 }
 
 function readIdentityField(section, field, label) {
