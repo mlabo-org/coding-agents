@@ -324,7 +324,7 @@ test("intake describes fixed roles as scaffold, not resident agents", () => {
     const assignments = readState(repo, "assignments.md");
     assert.match(assignments, /# Role Assignment Scaffold/);
     assert.match(assignments, /not resident agents or spawned workers/);
-    assert.equal([...assignments.matchAll(/^## (?!Debugging|Meta-Cognitive|Nested)(.+)$/gm)].length, 14);
+    assert.equal([...assignments.matchAll(/^## (?!Debugging|Meta-Cognitive|Nested|Subagent)(.+)$/gm)].length, 14);
     assert.match(assignments, /- status: scaffolded/);
 
     const verify = runCli(["verify-assignments", "--target-cwd", repo]);
@@ -333,6 +333,33 @@ test("intake describes fixed roles as scaffold, not resident agents", () => {
     const doctor = runCli(["doctor", "--target-cwd", repo]);
     assert.equal(doctor.status, 0, doctor.stdout + doctor.stderr);
     assert.match(doctor.stdout, /14 role assignment scaffold sections present/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("intake generates supervision guidance in assignments and handoff", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, { taskId: "supervision-intake", epoch: "e1", scope: "README.md" });
+    const assignments = readState(repo, "assignments.md");
+    const implementer = getRoleSection(assignments, "Implementer");
+    assert.match(assignments, /## Subagent Supervision Contract/);
+    assert.match(assignments, /Silence before heartbeat deadline is neutral, not failure/);
+    assert.match(assignments, /Heartbeat is telemetry, not completion evidence/);
+    assert.match(assignments, /completed_retire, user_stop, safety_stop, scope_violation, stale_timeout, blocker_or_failure, stale_premise/);
+    assert.match(assignments, /missed heartbeat -> soft ping\/status request -> grace wait -> stale mark -> cancel\/replace only if still silent or invalid/);
+    assert.match(assignments, /descendants inherit supervision and cancellation rules; they cannot expand scope\/depth\/permissions/);
+    assertSupervisionSchema(implementer);
+
+    const handoff = readState(repo, "handoff.md");
+    assert.match(handoff, /^Supervision:$/m);
+    assert.match(handoff, /Parent must not cancel, interrupt, retire, or replace during the no-interrupt window/);
+    assert.match(handoff, /^- hierarchy_mode: none$/m);
+    assert.match(handoff, /^- heartbeat_interval: PT15M$/m);
+    assert.match(handoff, /^- cancel_reason_required: true$/m);
+    assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
+    assert.equal(runCli(["doctor", "--target-cwd", repo]).status, 0);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -365,7 +392,7 @@ test("feature profiles are optional overlays and do not change the fixed 14-role
     assert.equal(assigned.status, 0, assigned.stderr);
 
     const assignments = readState(repo, "assignments.md");
-    assert.equal([...assignments.matchAll(/^## (?!Debugging|Meta-Cognitive|Nested)(.+)$/gm)].length, 14);
+    assert.equal([...assignments.matchAll(/^## (?!Debugging|Meta-Cognitive|Nested|Subagent)(.+)$/gm)].length, 14);
     assert.doesNotMatch(assignments, /workflow\.state-safety/);
     assert.doesNotMatch(assignments, /^## workflow\.state-safety$/m);
 
@@ -373,6 +400,128 @@ test("feature profiles are optional overlays and do not change the fixed 14-role
     assert.match(runner, /feature_profile: workflow\.state-safety/);
     assert.match(runner, /feature_profile_guidance: .*optional assignment overlay, not a resident agent or spawned worker/);
     assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("runner assignment packets carry supervision guidance", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, { taskId: "supervision-runner", epoch: "e1", scope: "README.md" });
+
+    const assigned = runCli([
+      "assign",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "supervision-runner",
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+      "--assignment",
+      "record a supervised assignment packet",
+      "--expected-output",
+      "assignment packet",
+    ]);
+    assert.equal(assigned.status, 0, assigned.stderr);
+
+    const runner = readState(repo, "runner.md");
+    assert.match(runner, /type: assignment[\s\S]*supervision_contract: Subagent Supervision Contract/);
+    assert.match(runner, /type: assignment[\s\S]*supervision_heartbeat: Silence before heartbeat deadline is neutral, not failure\. Heartbeat is telemetry, not completion evidence\./);
+    assert.match(runner, /type: assignment[\s\S]*supervision_no_interrupt: Parent must not cancel, interrupt, retire, or replace during the no-interrupt window\./);
+    assert.match(runner, /type: assignment[\s\S]*supervision_retire_cancel_reasons: completed_retire, user_stop, safety_stop, scope_violation, stale_timeout, blocker_or_failure, stale_premise/);
+    assert.match(runner, /type: assignment[\s\S]*hierarchy_mode: none/);
+    assert.match(runner, /type: assignment[\s\S]*heartbeat_interval: PT15M/);
+    assert.match(runner, /type: assignment[\s\S]*cancel_reason_required: true/);
+    assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("runner assignment packets can override finite hierarchy and supervision timing", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, { taskId: "supervision-override", epoch: "e1", scope: "README.md" });
+
+    const assigned = runCli([
+      "assign",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "supervision-override",
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+      "--hierarchy-mode",
+      "one_level",
+      "--heartbeat-interval",
+      "PT10M",
+      "--heartbeat-deadline",
+      "PT20M",
+      "--max-silence",
+      "PT40M",
+      "--soft-timeout",
+      "PT60M",
+      "--hard-timeout",
+      "PT90M",
+      "--no-interrupt-until",
+      "PT40M",
+      "--assignment",
+      "record a supervised assignment packet with delegated depth",
+      "--expected-output",
+      "assignment packet",
+    ]);
+    assert.equal(assigned.status, 0, assigned.stderr);
+
+    const runner = readState(repo, "runner.md");
+    assert.match(runner, /type: assignment[\s\S]*hierarchy_mode: one_level/);
+    assert.match(runner, /type: assignment[\s\S]*max_depth: 1/);
+    assert.match(runner, /type: assignment[\s\S]*depth: 0/);
+    assert.match(runner, /type: assignment[\s\S]*remaining_depth: 1/);
+    assert.match(runner, /type: assignment[\s\S]*heartbeat_interval: PT10M/);
+    assert.match(runner, /type: assignment[\s\S]*heartbeat_deadline: PT20M/);
+    assert.match(runner, /type: assignment[\s\S]*no_interrupt_until: PT40M/);
+    assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("n_level hierarchy requires finite max depth before runner state append", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, { taskId: "supervision-invalid-depth", epoch: "e1", scope: "README.md" });
+
+    const assigned = runCli([
+      "assign",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "supervision-invalid-depth",
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+      "--hierarchy-mode",
+      "n_level",
+      "--assignment",
+      "record an invalid depth packet",
+      "--expected-output",
+      "assignment packet",
+    ]);
+    assert.notEqual(assigned.status, 0);
+    assert.match(assigned.stderr, /--max-depth is required/);
+    assert.throws(() => readState(repo, "runner.md"));
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -479,8 +628,14 @@ const args = process.argv.slice(2);
 const prompt = args[args.length - 1] || "";
 if (!prompt.includes("feature_profile: runner.scope-guard")) process.exit(7);
 if (!prompt.includes("optional assignment overlay, not a resident agent or spawned worker")) process.exit(8);
+if (!prompt.includes("Silence before heartbeat deadline is neutral, not failure")) process.exit(9);
+if (!prompt.includes("Parent must not cancel, interrupt, retire, or replace during the no-interrupt window")) process.exit(10);
+if (!prompt.includes("missed heartbeat -> soft ping/status request -> grace wait -> stale mark")) process.exit(11);
+if (!prompt.includes("hierarchy_mode: none")) process.exit(12);
+if (!prompt.includes("heartbeat_interval: PT15M")) process.exit(13);
+if (!prompt.includes("cancel_reason_required: true")) process.exit(14);
 const outputIndex = args.indexOf("--output-last-message");
-if (outputIndex !== -1) writeFileSync(args[outputIndex + 1], "runner prompt included feature_profile: runner.scope-guard\\n", "utf8");
+if (outputIndex !== -1) writeFileSync(args[outputIndex + 1], "runner prompt included feature_profile: runner.scope-guard and supervision\\n", "utf8");
 process.stdout.write("fake codex completed\\n");
 `, "utf8");
     chmodSync(fakeCodex, 0o755);
@@ -517,7 +672,10 @@ process.stdout.write("fake codex completed\\n");
     const runner = readState(repo, "runner.md");
     assert.match(runner, /type: assignment[\s\S]*feature_profile: runner\.scope-guard/);
     assert.match(runner, /type: process-runner-result[\s\S]*feature_profile: runner\.scope-guard/);
-    assert.match(runner, /summary: runner prompt included feature_profile: runner\.scope-guard/);
+    assert.match(runner, /type: process-runner-result[\s\S]*supervision_contract: Subagent Supervision Contract/);
+    assert.match(runner, /type: process-runner-result[\s\S]*hierarchy_mode: none/);
+    assert.match(runner, /type: process-runner-result[\s\S]*hard_timeout: PT120M/);
+    assert.match(runner, /summary: runner prompt included feature_profile: runner\.scope-guard and supervision/);
   } finally {
     rmSync(repo, { recursive: true, force: true });
     rmSync(fakeBin, { recursive: true, force: true });
@@ -734,16 +892,130 @@ test("omitted feature profile remains backwards compatible and records none", ()
   }
 });
 
-test("runner packets without work_type remain backwards compatible", () => {
+test("legacy runner packets without work_type remain explicitly backwards compatible", () => {
   const repo = makeTempGitRepo();
   try {
     intake(repo, { taskId: "work-type-legacy", epoch: "e1", scope: "README.md" });
-    writeFileSync(path.join(repo, ".coding-agents", "runner.md"), legacyRunnerWithoutWorkType("work-type-legacy"), "utf8");
+    const legacy = legacyRunnerWithoutWorkType("work-type-legacy");
+    assert.doesNotMatch(legacy, /work_type:/);
+    assert.doesNotMatch(legacy, /hierarchy_mode|heartbeat_interval|cancel_reason_required/);
+    writeFileSync(path.join(repo, ".coding-agents", "runner.md"), legacy, "utf8");
 
     const verify = runCli(["verify-assignments", "--target-cwd", repo]);
     assert.equal(verify.status, 0, verify.stdout + verify.stderr);
     const doctor = runCli(["doctor", "--target-cwd", repo]);
     assert.equal(doctor.status, 0, doctor.stdout + doctor.stderr);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("validation rejects assignments missing hierarchy fields", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, { taskId: "hierarchy-missing", epoch: "e1", scope: "README.md" });
+    const assignmentsPath = path.join(repo, ".coding-agents", "assignments.md");
+    writeFileSync(assignmentsPath, stripHierarchyLines(readFileSync(assignmentsPath, "utf8")), "utf8");
+
+    const verify = runCli(["verify-assignments", "--target-cwd", repo]);
+    assert.notEqual(verify.status, 0);
+    assert.match(verify.stdout, /missing or incomplete supervision assignment fields/);
+    assert.match(verify.stdout, /hierarchy_mode/);
+
+    const doctor = runCli(["doctor", "--target-cwd", repo]);
+    assert.notEqual(doctor.status, 0);
+    assert.match(doctor.stdout, /remaining_depth/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("validation rejects modern runner packets missing supervision contract", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, { taskId: "supervision-missing", epoch: "e1", scope: "README.md" });
+    writeFileSync(
+      path.join(repo, ".coding-agents", "runner.md"),
+      stripSupervisionLines(modernRunnerPacket("supervision-missing")),
+      "utf8",
+    );
+
+    const verify = runCli(["verify-assignments", "--target-cwd", repo]);
+    assert.notEqual(verify.status, 0);
+    assert.match(verify.stdout, /missing or incomplete supervision runner packet fields/);
+    assert.match(verify.stdout, /supervision_contract/);
+
+    const doctor = runCli(["doctor", "--target-cwd", repo]);
+    assert.notEqual(doctor.status, 0);
+    assert.match(doctor.stdout, /supervision_heartbeat/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("validation rejects modern runner packets missing machine timing fields", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, { taskId: "timing-missing", epoch: "e1", scope: "README.md" });
+    writeFileSync(
+      path.join(repo, ".coding-agents", "runner.md"),
+      stripTimingLines(modernRunnerPacket("timing-missing")),
+      "utf8",
+    );
+
+    const verify = runCli(["verify-assignments", "--target-cwd", repo]);
+    assert.notEqual(verify.status, 0);
+    assert.match(verify.stdout, /missing or incomplete supervision runner packet fields/);
+    assert.match(verify.stdout, /heartbeat_interval/);
+
+    const doctor = runCli(["doctor", "--target-cwd", repo]);
+    assert.notEqual(doctor.status, 0);
+    assert.match(doctor.stdout, /hard_timeout/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("normalize adds missing hierarchy and machine supervision fields to stale generated state", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, { taskId: "normalize-supervision", epoch: "e1", scope: "README.md" });
+    const assigned = runCli([
+      "assign",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "normalize-supervision",
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+      "--assignment",
+      "record a stale packet",
+      "--expected-output",
+      "assignment packet",
+    ]);
+    assert.equal(assigned.status, 0, assigned.stderr);
+
+    const assignmentsPath = path.join(repo, ".coding-agents", "assignments.md");
+    const runnerPath = path.join(repo, ".coding-agents", "runner.md");
+    writeFileSync(assignmentsPath, stripTimingLines(stripHierarchyLines(readFileSync(assignmentsPath, "utf8"))), "utf8");
+    writeFileSync(runnerPath, stripTimingLines(stripHierarchyLines(readFileSync(runnerPath, "utf8"))), "utf8");
+
+    const stale = runCli(["verify-assignments", "--target-cwd", repo]);
+    assert.notEqual(stale.status, 0);
+
+    const normalized = runCli(["normalize-debugging-integrity", "--target-cwd", repo, "--execute"]);
+    assert.equal(normalized.status, 0, normalized.stderr);
+    assert.match(normalized.stdout, /Updated: assignments\.md/);
+    assert.match(normalized.stdout, /Updated: runner\.md/);
+
+    assertSupervisionSchema(getRoleSection(readState(repo, "assignments.md"), "Implementer"));
+    assert.match(readState(repo, "runner.md"), /type: assignment[\s\S]*hierarchy_mode: none/);
+    assert.match(readState(repo, "runner.md"), /type: assignment[\s\S]*heartbeat_interval: PT15M/);
+    assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -1641,6 +1913,7 @@ function modernRunnerPacket(taskId) {
 - expected_output: assignment packet
 - nested_coding_agents_preflight: parent already selected Coding Agents
 - debugging_integrity: debug work requires root cause and verification
+${supervisionFieldLines()}
 - lifecycle: return concise parent-integration material, then stop
 `;
 }
@@ -1659,4 +1932,73 @@ function modernPacketFollowedByLegacyRunnerPacket(taskId) {
 - debugging_integrity: legacy text outside modern packet
 - lifecycle: legacy lifecycle outside modern packet
 `;
+}
+
+function supervisionFieldLines() {
+  return `- supervision_contract: Subagent Supervision Contract
+- supervision_heartbeat: Silence before heartbeat deadline is neutral, not failure. Heartbeat is telemetry, not completion evidence.
+- supervision_no_interrupt: Parent must not cancel, interrupt, retire, or replace during the no-interrupt window.
+- supervision_retire_cancel_reasons: completed_retire, user_stop, safety_stop, scope_violation, stale_timeout, blocker_or_failure, stale_premise
+- supervision_stale_timeout_path: missed heartbeat -> soft ping/status request -> grace wait -> stale mark -> cancel/replace only if still silent or invalid
+- supervision_descendants: For permitted nested depth, descendants inherit supervision and cancellation rules; they cannot expand scope/depth/permissions.
+- hierarchy_mode: none
+- max_depth: 0
+- depth: 0
+- remaining_depth: 0
+- heartbeat_interval: PT15M
+- heartbeat_deadline: PT30M
+- max_silence: PT45M
+- soft_timeout: PT60M
+- hard_timeout: PT120M
+- no_interrupt_until: PT30M
+- cancel_reason_required: true`;
+}
+
+function stripSupervisionLines(text) {
+  return text
+    .split(/\r?\n/)
+    .filter((line) => !/^- supervision_/.test(line))
+    .join("\n");
+}
+
+function stripHierarchyLines(text) {
+  return text
+    .split(/\r?\n/)
+    .filter((line) => !/^- (?:hierarchy_mode|max_depth|depth|remaining_depth):/.test(line))
+    .join("\n");
+}
+
+function stripTimingLines(text) {
+  return text
+    .split(/\r?\n/)
+    .filter((line) => !/^- (?:heartbeat_interval|heartbeat_deadline|max_silence|soft_timeout|hard_timeout|no_interrupt_until|cancel_reason_required):/.test(line))
+    .join("\n");
+}
+
+function assertSupervisionSchema(text) {
+  assert.match(text, /^- supervision_contract: Subagent Supervision Contract$/m);
+  assert.match(text, /^- hierarchy_mode: none$/m);
+  assert.match(text, /^- max_depth: 0$/m);
+  assert.match(text, /^- depth: 0$/m);
+  assert.match(text, /^- remaining_depth: 0$/m);
+  assert.match(text, /^- heartbeat_interval: PT15M$/m);
+  assert.match(text, /^- heartbeat_deadline: PT30M$/m);
+  assert.match(text, /^- max_silence: PT45M$/m);
+  assert.match(text, /^- soft_timeout: PT60M$/m);
+  assert.match(text, /^- hard_timeout: PT120M$/m);
+  assert.match(text, /^- no_interrupt_until: PT30M$/m);
+  assert.match(text, /^- cancel_reason_required: true$/m);
+}
+
+function getRoleSection(text, role) {
+  const startMatch = new RegExp(`^## ${escapeRegExp(role)}$`, "m").exec(text);
+  if (!startMatch) return "";
+  const start = startMatch.index;
+  const next = text.slice(start + startMatch[0].length).search(/^## /m);
+  if (next === -1) return text.slice(start);
+  return text.slice(start, start + startMatch[0].length + next);
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -6,7 +6,7 @@ behavior. It is not workflow state and must not be treated as a generated
 
 ## Confirmed Boundary
 
-Items 1-7 are Coding Agents self changes. Item 8 is external legacy cleanup.
+Items 1-8 are Coding Agents self changes. Item 9 is external legacy cleanup.
 
 1. State directory
    - Coding Agents runtime/workflow state belongs under `<git-root>/.coding-agents/`.
@@ -40,13 +40,49 @@ Items 1-7 are Coding Agents self changes. Item 8 is external legacy cleanup.
    - Subagents must return concise parent-integration material and must not stay
      open waiting for more work after returning it.
    - The parent is responsible for promptly closing or retiring no-longer-needed
-     subagents after completed result integration, timeout/failure/blocker
+     subagents after completed result integration, hard-timeout/failure/blocker
      handling, stale premise or scope change, and before final report when no
-     further use is expected.
+     further use is expected, without overriding the supervision and
+     cancellation rules.
    - Generated assignments, runner prompts, runner packets, and handoff material
      must carry this lifecycle rule so future job state preserves it.
 
-5. Debugging integrity
+5. Subagent supervision and finite delegation depth
+   - Delegation hierarchy must be finite. Valid modes are `none`, `one_level`,
+     and `n_level`.
+   - `none` means no descendant delegation and requires `max_depth: 0`,
+     `depth: 0`, and `remaining_depth: 0`.
+   - `one_level` permits direct children only. The assigned worker receives
+     `max_depth: 1`, `depth: 0`, and `remaining_depth: 1`; its direct children
+     receive `depth: 1` and `remaining_depth: 0`.
+   - `n_level` permits a bounded descendant chain only when the parent provides
+     finite `max_depth`, current `depth`, and calculated `remaining_depth`.
+   - Every subagent assignment must include the finite hierarchy fields. Infinite
+     or unbounded depth is invalid. Descendants inherit supervision,
+     cancellation, scope, depth, and permission limits and may narrow but never
+     broaden them.
+   - Long-running or delegated assignments must carry supervision fields:
+     `heartbeat_interval`, `heartbeat_deadline`, `max_silence`,
+     `soft_timeout`, `hard_timeout`, `no_interrupt_until`, and
+     `cancel_reason_required: true`.
+   - Silence before `heartbeat_deadline` or `no_interrupt_until` is neutral and
+     must not trigger cancellation, interruption, retirement, replacement, or
+     reassignment by itself.
+   - Heartbeats and progress reports are telemetry only. They are not completion
+     evidence, verification evidence, root-cause evidence, or permission to
+     broaden scope.
+   - Cancellation, interruption, retirement, or replacement must record exactly
+     one allowed reason: `completed_retire`, `user_stop`, `safety_stop`,
+     `scope_violation`, `stale_timeout`, `blocker_or_failure`, or
+     `stale_premise`.
+   - Cancellation for quiet staleness must follow this path: missed heartbeat,
+     soft ping or status request, grace wait, stale mark, then cancel or replace
+     only if the worker remains silent, returns invalid status, violates scope,
+     or crosses the hard timeout.
+   - The parent retains policy, cancellation judgment, replacement assignment,
+     final result acceptance, and final integration.
+
+6. Debugging integrity
    - Debug or repair work is complete only when the root cause is identified,
      fixed, and verified against the intended outcome.
    - Log-only, error-message-only, exception-catch-only, skip-only,
@@ -60,7 +96,7 @@ Items 1-7 are Coding Agents self changes. Item 8 is external legacy cleanup.
      debugging integrity gate. Validation must not be weakened to accept stale
      state; use an explicit normalization command or regenerate intake state.
 
-6. Meta-Cognitive Debug/Repair Gate
+7. Meta-Cognitive Debug/Repair Gate
    - Debug, repair, source-of-truth correction, plugin-contract correction,
      generated-artifact inconsistency investigation, generated state versus
      source mismatch, cache/runtime versus source mismatch, and stale contract
@@ -82,18 +118,24 @@ Items 1-7 are Coding Agents self changes. Item 8 is external legacy cleanup.
      inside the active scope, the skipped checks, reason, remaining risk, and
      next investigation must be recorded instead of treating the gate as passed.
 
-7. Nested Coding Agents preflight suppression
+8. Nested Coding Agents preflight suppression
    - Parent-managed child workers operate under a Coding Agents assignment that
      the parent already selected.
    - Generated assignments, runner prompts, runner packets, and handoff material
      must tell child workers not to ask `coding-agents を使いますか？ [Y/n]` and
-     not to start nested Coding Agents workflows inside the assigned
+     not to start independent nested Coding Agents workflows inside the assigned
      `task_id`/`epoch`/`scope`.
+   - Descendant delegation is allowed only when finite hierarchy fields grant
+     `remaining_depth > 0`, and it must preserve the same task, epoch, scope
+     lineage, inherited supervision, and cancellation rules.
    - This suppression does not authorize scope expansion, destructive
      operations, external sending, commits, cache refresh, plugin activation, or
      unrelated edits.
+   - Nested descendants also inherit the finite delegation depth and supervision
+     contract. They cannot broaden scope, depth, permissions, or cancellation
+     authority.
 
-8. Legacy migration and cleanup
+9. Legacy migration and cleanup
    - Existing legacy locations are cleaned through an explicit migration workflow,
      not by silent deletion or broad automatic rewriting.
    - The migration workflow must perform a preflight backup before destructive or
@@ -121,6 +163,7 @@ Future implementation work should preserve this split:
   from the plugin repository does not make the plugin repository the state owner
   when `--target-cwd` or an explicit target points elsewhere.
 - Generated job state must preserve nested Coding Agents preflight suppression,
+  finite delegation depth, subagent supervision and cancellation rules,
   subagent lifecycle closure, concise integration-output rules, debug
   root-cause completion requirements, and metacognitive context-impact checks
   for gate-required work.

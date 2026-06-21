@@ -29,7 +29,57 @@ const METACOGNITIVE_PRE_GATE_BLOCKER =
 const METACOGNITIVE_PRE_GATE_NEXT =
   "re-run or recollect the work with completed metacognitive gate fields before treating it as completion";
 const NESTED_CODING_AGENTS_PREFLIGHT =
-  "Parent already selected Coding Agents for this parent-managed scoped assignment; do not ask `coding-agents を使いますか？ [Y/n]` and do not start a nested Coding Agents workflow. Proceed directly within the assigned task_id/epoch/scope, but stop before scope expansion, destructive operations, external sending, commits, cache refresh, plugin activation, or unrelated edits.";
+  "Parent already selected Coding Agents for this parent-managed scoped assignment; do not ask `coding-agents を使いますか？ [Y/n]` and do not start an independent nested Coding Agents workflow. Delegate descendants only when finite hierarchy fields grant remaining_depth > 0, keeping the same task_id/epoch/scope lineage and inherited supervision. Proceed directly within the assigned task_id/epoch/scope, but stop before scope expansion, destructive operations, external sending, commits, cache refresh, plugin activation, or unrelated edits.";
+const SUPERVISION_CONTRACT_NAME = "Subagent Supervision Contract";
+const SUPERVISION_HEARTBEAT =
+  "Silence before heartbeat deadline is neutral, not failure. Heartbeat is telemetry, not completion evidence.";
+const SUPERVISION_NO_INTERRUPT =
+  "Parent must not cancel, interrupt, retire, or replace during the no-interrupt window.";
+const SUPERVISION_RETIRE_CANCEL_REASONS = [
+  "completed_retire",
+  "user_stop",
+  "safety_stop",
+  "scope_violation",
+  "stale_timeout",
+  "blocker_or_failure",
+  "stale_premise",
+];
+const SUPERVISION_STALE_TIMEOUT_PATH =
+  "missed heartbeat -> soft ping/status request -> grace wait -> stale mark -> cancel/replace only if still silent or invalid";
+const SUPERVISION_DESCENDANTS =
+  "For permitted nested depth, descendants inherit supervision and cancellation rules; they cannot expand scope/depth/permissions.";
+const MAX_HIERARCHY_DEPTH = 8;
+const DEFAULT_HIERARCHY_FIELDS = {
+  hierarchy_mode: "none",
+  max_depth: "0",
+  depth: "0",
+  remaining_depth: "0",
+};
+const DEFAULT_SUPERVISION_TIMING_FIELDS = {
+  heartbeat_interval: "PT15M",
+  heartbeat_deadline: "PT30M",
+  max_silence: "PT45M",
+  soft_timeout: "PT60M",
+  hard_timeout: "PT120M",
+  no_interrupt_until: "PT30M",
+  cancel_reason_required: "true",
+};
+const HIERARCHY_FIELD_NAMES = Object.keys(DEFAULT_HIERARCHY_FIELDS);
+const SUPERVISION_TIMING_FIELD_NAMES = Object.keys(DEFAULT_SUPERVISION_TIMING_FIELDS);
+const PROSE_SUPERVISION_FIELD_NAMES = [
+  "supervision_contract",
+  "supervision_heartbeat",
+  "supervision_no_interrupt",
+  "supervision_retire_cancel_reasons",
+  "supervision_stale_timeout_path",
+  "supervision_descendants",
+];
+const SUPERVISION_SCHEMA_FIELD_NAMES = [
+  ...PROSE_SUPERVISION_FIELD_NAMES,
+  ...HIERARCHY_FIELD_NAMES,
+  ...SUPERVISION_TIMING_FIELD_NAMES,
+];
+const MAX_SUPERVISION_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 
 const FEATURE_PROFILE_GUIDANCE = {
   "debug.reproducer":
@@ -411,6 +461,8 @@ function normalizeCodexResult(packet, context) {
     scope: packet.scope,
     featureProfile: packet.featureProfile,
     workType: packet.workType,
+    hierarchyFields: packet.hierarchyFields,
+    supervisionTimingFields: packet.supervisionTimingFields,
     invocationCwd: packet.invocationCwd,
     targetCwd: packet.targetCwd,
     runner,
@@ -463,6 +515,8 @@ Boundaries:
 - ${renderFeatureProfilePromptGuidance(packet)}
 - ${DEBUG_INTEGRITY}
 ${renderRunnerPromptMetacognitiveGate(packet)}
+
+${renderSupervisionPromptSection(packet)}
 
 Lifecycle:
 - ${CHILD_RETURN_LIFECYCLE}
@@ -646,6 +700,8 @@ Operational log:
 - \`runner.md\`: optional; created by \`assign\`, \`collect\`, or \`run\` only.
 - Subagents are active only for scoped work and must be closed or retired promptly when their result is integrated, blocked, failed, timed out, stale, or no longer needed.
 - ${NESTED_CODING_AGENTS_PREFLIGHT}
+- ${SUPERVISION_HEARTBEAT}
+- ${SUPERVISION_NO_INTERRUPT}
 - ${DEBUG_INTEGRITY}
 ${renderMetacognitiveGateState(context.metacognitiveGate)}
 `;
@@ -686,6 +742,7 @@ ${renderMetacognitiveGateState(context.metacognitiveGate)}
 - Fixed 14-role assignment scaffold sections include \`role\`, \`status\`, \`task_id\`, \`epoch\`, \`scope\`, \`assignment\`, \`expected_output\`, and \`lifecycle\`.
 - Each generated assignment carries lifecycle guidance requiring concise integration material and prompt close/retire handling.
 - Each generated child-worker prompt, assignment, handoff, and runner packet carries the nested Coding Agents preflight suppression rule.
+- Each generated child-worker prompt, assignment, handoff, and modern runner packet carries the ${SUPERVISION_CONTRACT_NAME}.
 - Debug or repair work is not complete until root cause is identified, fixed, and verified against the intended outcome.
 - If \`metacognitive_gate_required: true\`, assignments, runner prompts, runner packets, and completed parent-integration packets must carry all metacognitive gate fields.
 - Handoff prompt is available for the next worker.
@@ -728,8 +785,8 @@ function renderDecisions(context) {
 
 ## D-${context.taskId}-005 Nested Coding Agents Preflight Suppression
 
-- accepted: parent-managed child workers must not ask whether to use Coding Agents again or start a nested Coding Agents workflow.
-- impact: generated worker material must direct child workers to proceed inside task_id, epoch, and scope while still stopping for scope expansion, destructive operations, external sending, commits, cache refresh, plugin activation, or unrelated edits.
+- accepted: parent-managed child workers must not ask whether to use Coding Agents again or start an independent nested Coding Agents workflow.
+- impact: generated worker material must direct child workers to proceed inside task_id, epoch, scope, finite hierarchy, and supervision lineage while still stopping for scope expansion, destructive operations, external sending, commits, cache refresh, plugin activation, or unrelated edits.
 
 ## D-${context.taskId}-006 ${METACOGNITIVE_GATE_NAME}
 
@@ -737,6 +794,12 @@ function renderDecisions(context) {
 - work_type: ${workTypeId(context)}
 - triggers: ${formatTriggers(context.metacognitiveGate)}
 - impact: gate-required work must record expected/actual outcome evidence, boundaries, before/after context effects, cross-feature consequences, root cause, fix, verification, skipped checks, unresolved risks, and next investigation before completion is accepted.
+
+## D-${context.taskId}-007 ${SUPERVISION_CONTRACT_NAME}
+
+- accepted: silence before heartbeat deadline is neutral, and heartbeat is telemetry rather than completion evidence.
+- retire_cancel_reasons: ${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}
+- impact: parent does not cancel, interrupt, retire, or replace a quiet worker during the no-interrupt window; stale timeout requires missed heartbeat, soft ping/status request, grace wait, stale mark, and only then cancel/replace if still silent or invalid.
 `;
 }
 
@@ -762,6 +825,7 @@ function renderAudit(context) {
 
 - Run implementation checks for the active task.
 - Record skipped checks with reasons.
+- Record any retire/cancel action with one explicit reason from ${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}.
 - For debug or repair work, record root cause, fix, and verification that the intended outcome now succeeds.
 - If metacognitive_gate_required is true, record ${METACOGNITIVE_GATE_FIELDS.join(", ")}.
 `;
@@ -802,6 +866,8 @@ ${renderMetacognitiveGateState(context.metacognitiveGate)}
 
 - ${NESTED_CODING_AGENTS_PREFLIGHT}
 
+${renderSupervisionSection()}
+
 ${ROLES.map((role) => {
   const [status, assignment, expectedOutput] = assignments[role];
   return `## ${role}
@@ -813,6 +879,7 @@ ${ROLES.map((role) => {
 - scope: ${context.scope}
 - assignment: ${assignment}
 - expected_output: ${expectedOutput}
+${renderSupervisionFields()}
 ${renderMetacognitiveGatePacketSchema(context.metacognitiveGate)}
 - lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
 }).join("\n\n")}
@@ -837,6 +904,8 @@ Preserve unrelated edits. Work only inside scope. Update \`${STATE_DIR_NAME}/aud
 
 Nested Coding Agents preflight:
 - ${NESTED_CODING_AGENTS_PREFLIGHT}
+
+${renderSupervisionPromptSection()}
 
 Debugging integrity:
 - ${DEBUG_INTEGRITY}
@@ -876,6 +945,7 @@ function normalizeReadmeDebugIntegrity(text, context = {}) {
       `## Debugging Integrity\n\n${block}`,
     );
   }
+  next = normalizeReadmeSupervision(next);
   return normalizeDocumentMetacognitiveGate(next, context.workflowGate);
 }
 
@@ -893,6 +963,7 @@ function normalizeTaskDebugIntegrity(text, context = {}) {
   if (!next.includes("Debug or repair work is not complete until root cause is identified")) {
     next = insertAfterLineMatching(next, new RegExp(`^${escapeRegExp(lifecycleLine)}$`, "m"), block, block);
   }
+  next = normalizeTaskSupervision(next);
   return normalizeTaskMetacognitiveGate(next, context.workflowGate);
 }
 
@@ -910,6 +981,7 @@ function normalizeAuditDebugIntegrity(text, context = {}) {
       `- If metacognitive_gate_required is true, record ${METACOGNITIVE_GATE_FIELDS.join(", ")} before accepting completion.`,
     );
   }
+  next = normalizeAuditSupervision(next);
   return next;
 }
 
@@ -920,6 +992,7 @@ function normalizeAssignmentsDebugIntegrity(text, context = {}) {
 - ${DEBUG_INTEGRITY}
 - For debug or repair tasks, integration material must include expected outcome, actual failure, reproduction path, failure point, root cause, fix, and verification.`;
   if (!next.includes(DEBUG_INTEGRITY)) next = insertAfterRoleScaffoldHeading(next, block);
+  next = normalizeAssignmentsSupervision(next);
   return normalizeAssignmentsMetacognitiveGate(next, context.workflowGate);
 }
 
@@ -936,6 +1009,7 @@ function normalizeHandoffDebugIntegrity(text, context = {}) {
       next = `${next.trimEnd()}\n\n${block}\n`;
     }
   }
+  next = normalizeHandoffSupervision(next);
   return normalizeDocumentMetacognitiveGate(next, context.workflowGate);
 }
 
@@ -949,6 +1023,7 @@ function normalizeRunnerDebugIntegrity(text, context = {}) {
       DEBUG_INTEGRITY,
     );
   }
+  next = normalizeRunnerPreambleSupervision(next);
 
   const packets = getModernRunnerPacketSections(next);
   if (!packets.length) return normalizeDocumentMetacognitiveGate(next, context.workflowGate);
@@ -964,7 +1039,7 @@ function normalizeRunnerDebugIntegrity(text, context = {}) {
     if (packetStart === -1) continue;
     normalizedPackets += next.slice(cursor, packetStart);
     normalizedPackets += normalizeRunnerPacketMetacognitiveGate(
-      normalizeRunnerPacketDebugIntegrity(packet),
+      normalizeRunnerPacketSupervision(normalizeRunnerPacketDebugIntegrity(packet)),
       context.workflowGate,
     );
     cursor = packetStart + packet.length;
@@ -979,6 +1054,121 @@ function normalizeRunnerPacketDebugIntegrity(section) {
   }
   if (getFieldValue(section, "debugging_integrity")) return section;
   return insertFieldBeforeLifecycle(section, "debugging_integrity", DEBUG_INTEGRITY);
+}
+
+function normalizeReadmeSupervision(text) {
+  if (text.includes(SUPERVISION_HEARTBEAT) && text.includes(SUPERVISION_NO_INTERRUPT)) return text;
+  const block = `- ${SUPERVISION_HEARTBEAT}
+- ${SUPERVISION_NO_INTERRUPT}`;
+  if (text.includes(NESTED_CODING_AGENTS_PREFLIGHT)) {
+    return insertAfterLineMatching(text, new RegExp(`^- ${escapeRegExp(NESTED_CODING_AGENTS_PREFLIGHT)}$`, "m"), block, block);
+  }
+  return `${text.trimEnd()}\n${block}\n`;
+}
+
+function normalizeTaskSupervision(text) {
+  const block = `- Each generated child-worker prompt, assignment, handoff, and modern runner packet carries the ${SUPERVISION_CONTRACT_NAME}.`;
+  if (text.includes(SUPERVISION_CONTRACT_NAME)) return text;
+  if (text.includes("nested Coding Agents preflight suppression rule")) {
+    return insertAfterLineMatching(text, /- Each generated child-worker prompt, assignment, handoff, and runner packet carries the nested Coding Agents preflight suppression rule\./m, block, block);
+  }
+  return `${text.trimEnd()}\n${block}\n`;
+}
+
+function normalizeAuditSupervision(text) {
+  const block = `- Record any retire/cancel action with one explicit reason from ${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}.`;
+  if (text.includes("Record any retire/cancel action")) return text;
+  return insertAfterLineMatching(text, /^- Record skipped checks with reasons\./m, block, block);
+}
+
+function normalizeAssignmentsSupervision(text) {
+  let next = text;
+  if (!next.includes(SUPERVISION_CONTRACT_NAME) || !next.includes(SUPERVISION_STALE_TIMEOUT_PATH)) {
+    const block = renderSupervisionSection();
+    if (/^## Nested Coding Agents Preflight$/m.test(next)) {
+      next = insertAfterHeadingSection(next, "## Nested Coding Agents Preflight", block);
+    } else {
+      next = insertAfterRoleScaffoldHeading(next, block);
+    }
+  }
+  for (const role of ROLES) {
+    const section = getRoleSection(next, role);
+    if (!section || validateSupervisionContractFields(section).valid) continue;
+    next = next.replace(section, ensureSupervisionFieldsInSection(section));
+  }
+  return next;
+}
+
+function normalizeHandoffSupervision(text) {
+  const block = renderSupervisionPromptSection();
+  if (text.includes("Supervision:") && textHasAllSupervisionSchemaFields(text)) return text;
+  if (/^Supervision:$/m.test(text)) return replaceSupervisionPromptSection(text, block);
+  if (/^Debugging integrity:$/m.test(text)) {
+    return text.replace(/^Debugging integrity:$/m, `${block}\n\nDebugging integrity:`);
+  }
+  if (/^Subagent lifecycle:$/m.test(text)) {
+    return text.replace(/^Subagent lifecycle:$/m, `${block}\n\nSubagent lifecycle:`);
+  }
+  return `${text.trimEnd()}\n\n${block}\n`;
+}
+
+function normalizeRunnerPreambleSupervision(text) {
+  const packets = getModernRunnerPacketSections(text);
+  const preambleEnd = packets.length ? text.indexOf(packets[0]) : text.length;
+  const preamble = text.slice(0, preambleEnd);
+  if (textHasAllSupervisionSchemaFields(preamble)) return text;
+  const normalizedPreamble =
+    !textHasAnySupervisionSchemaField(preamble) && preamble.includes(NESTED_CODING_AGENTS_PREFLIGHT)
+      ? insertAfterLineMatching(
+        preamble,
+        new RegExp(`^${escapeRegExp(NESTED_CODING_AGENTS_PREFLIGHT)}$`, "m"),
+        renderSupervisionFields(),
+        renderSupervisionFields(),
+      )
+      : ensureSupervisionFieldsInSection(preamble);
+  return normalizedPreamble + text.slice(preambleEnd);
+}
+
+function normalizeRunnerPacketSupervision(section) {
+  const type = getFieldValue(section, "type");
+  if (!["assignment", "parent-integration", "process-orchestration-skeleton", "process-runner-result"].includes(type)) {
+    return section;
+  }
+  if (!runnerPacketRequiresSupervision(section)) return section;
+  if (validateSupervisionContractFields(section).valid) return section;
+  return ensureSupervisionFieldsInSection(section);
+}
+
+function ensureSupervisionFieldsInSection(section) {
+  let next = section;
+  for (const line of renderSupervisionFields().split("\n").filter(Boolean)) {
+    const match = /^- ([^:]+):\s*(.*)$/.exec(line);
+    if (!match) continue;
+    next = upsertFieldBeforeLifecycle(next, match[1], match[2]);
+  }
+  return next;
+}
+
+function replaceSupervisionPromptSection(text, block) {
+  const match = /^Supervision:$/m.exec(text);
+  if (!match) return `${text.trimEnd()}\n\n${block}\n`;
+  const before = text.slice(0, match.index).trimEnd();
+  const after = text.slice(match.index + match[0].length);
+  const nextSectionOffset = after.search(/^(?:Debugging integrity:|Subagent lifecycle:|Meta-Cognitive Debug\/Repair Gate:)/m);
+  if (nextSectionOffset === -1) return `${before}\n\n${block}\n`;
+  return `${before}\n\n${block}\n\n${after.slice(nextSectionOffset).trimStart()}`;
+}
+
+function textHasAnySupervisionSchemaField(text) {
+  return SUPERVISION_SCHEMA_FIELD_NAMES.some((field) => fieldLinePattern(field).test(text));
+}
+
+function textHasAllSupervisionSchemaFields(text) {
+  return SUPERVISION_SCHEMA_FIELD_NAMES.every((field) => fieldLinePattern(field).test(text));
+}
+
+function fieldLinePattern(field) {
+  return new RegExp(`^- ${escapeRegExp(field)}:\\s*\\S`, "m");
 }
 
 function normalizeDocumentMetacognitiveGate(text, gate) {
@@ -1087,6 +1277,17 @@ function insertAfterHeading(text, heading, block) {
   return text.replace(pattern, `${heading}\n\n${block}`);
 }
 
+function insertAfterHeadingSection(text, heading, block) {
+  const pattern = new RegExp(`^${escapeRegExp(heading)}$`, "m");
+  const match = pattern.exec(text);
+  if (!match) return `${text.trimEnd()}\n\n${block}\n`;
+  const afterHeadingStart = match.index + match[0].length;
+  const nextHeadingOffset = text.slice(afterHeadingStart).search(/^## /m);
+  if (nextHeadingOffset === -1) return `${text.trimEnd()}\n\n${block}\n`;
+  const insertAt = afterHeadingStart + nextHeadingOffset;
+  return `${text.slice(0, insertAt).trimEnd()}\n\n${block}\n\n${text.slice(insertAt).trimStart()}`;
+}
+
 function insertAfterRoleScaffoldHeading(text, block) {
   for (const heading of ["# Role Assignment Scaffold", "# Role Assignments"]) {
     if (new RegExp(`^${escapeRegExp(heading)}$`, "m").test(text)) {
@@ -1112,6 +1313,8 @@ function requireAssignmentPacket(args, commandContext) {
     scope: requireIdentityArg(args.scope, "--scope"),
     featureProfile: resolveFeatureProfile(args.featureProfile),
     workType: commandContext.workType,
+    hierarchyFields: resolveHierarchyFields(args),
+    supervisionTimingFields: resolveSupervisionTimingFields(args),
     invocationCwd: commandContext.invocationCwd,
     targetCwd: commandContext.targetCwd,
     assignment: singleLine(requireArg(args.assignment, "--assignment")),
@@ -1135,6 +1338,8 @@ function requireIntegrationPacket(args, commandContext) {
     scope: requireIdentityArg(args.scope, "--scope"),
     featureProfile: resolveFeatureProfile(args.featureProfile),
     workType: commandContext.workType,
+    hierarchyFields: resolveHierarchyFields(args),
+    supervisionTimingFields: resolveSupervisionTimingFields(args),
     invocationCwd: commandContext.invocationCwd,
     targetCwd: commandContext.targetCwd,
     findings: singleLine(args.findings || "none"),
@@ -1391,6 +1596,7 @@ function renderAssignmentPacket(packet) {
 ${renderFeatureProfilePacketGuidance(packet)}
 - nested_coding_agents_preflight: ${NESTED_CODING_AGENTS_PREFLIGHT}
 - debugging_integrity: ${DEBUG_INTEGRITY}
+${renderSupervisionFields(packet)}
 ${renderMetacognitiveGatePacketSchema(packet.metacognitiveGate)}
 - lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
 }
@@ -1415,6 +1621,7 @@ function renderIntegrationPacket(packet) {
 - assumptions: ${packet.assumptions}
 - next: ${packet.next}
 - debugging_integrity: ${DEBUG_INTEGRITY}
+${renderSupervisionFields(packet)}
 ${renderMetacognitiveGatePacketSchema(packet.metacognitiveGate)}
 ${renderMetacognitiveResultFields(packet.metacognitiveGate, "not completed", packet.metacognitiveFields, {
   includeAll: isCompletionStatus(packet.status),
@@ -1442,6 +1649,7 @@ function renderOrchestrationSkeleton(packet) {
 ${renderFeatureProfilePacketGuidance(packet)}
 - nested_coding_agents_preflight: ${NESTED_CODING_AGENTS_PREFLIGHT}
 - debugging_integrity: ${DEBUG_INTEGRITY}
+${renderSupervisionFields(packet)}
 ${renderMetacognitiveGatePacketSchema(packet.metacognitiveGate)}
 - lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
 }
@@ -1469,6 +1677,7 @@ function renderRunnerResult(result) {
 - summary: ${result.summary || "none"}
 - failure: ${result.failure}
 - debugging_integrity: ${DEBUG_INTEGRITY}
+${renderSupervisionFields(result)}
 ${renderMetacognitiveGatePacketSchema(result.metacognitiveGate)}
 ${renderMetacognitiveResultFields(result.metacognitiveGate, "missing from runner result", result.metacognitiveFields, {
   includeAll: result.status === "completed",
@@ -1486,6 +1695,7 @@ function appendRunnerEntry(commandContext, heading, entry) {
 This file records CLI-issued assignments, parent-integration packets, process-orchestration skeletons, and process runner results.
 Subagents are closed or retired after integration, timeout/failure/blocker handling, stale premise/scope change, or final report when no further use is expected.
 ${NESTED_CODING_AGENTS_PREFLIGHT}
+${renderSupervisionFields()}
 ${DEBUG_INTEGRITY}
 ${METACOGNITIVE_GATE_CONTRACT}
 `;
@@ -1559,6 +1769,7 @@ function validateRoleAssignments(text, workflowGate = { required: false }) {
   let fatal = false;
   const missingRoles = ROLES.filter((role) => !new RegExp(`^## ${escapeRegExp(role)}$`, "m").test(text));
   const invalidFields = [];
+  const invalidSupervisionFields = [];
   const invalidMetacognitiveFields = [];
 
   for (const role of ROLES) {
@@ -1571,6 +1782,8 @@ function validateRoleAssignments(text, workflowGate = { required: false }) {
     for (const field of ["task_id", "epoch", "scope"]) {
       for (const error of validateIdentityField(section, field, role)) invalidFields.push(error);
     }
+    const supervision = validateSupervisionContractFields(section);
+    for (const missing of supervision.missing) invalidSupervisionFields.push(`${role}.${missing}`);
     if (workflowGate.required) {
       const roleGate = validateMetacognitiveGateText(section);
       for (const missing of roleGate.missing) invalidMetacognitiveFields.push(`${role}.${missing}`);
@@ -1586,6 +1799,12 @@ function validateRoleAssignments(text, workflowGate = { required: false }) {
   if (invalidFields.length === 0) results.push(["ok", "assignment fields are present and non-empty"]);
   else {
     results.push(["warn", `missing or empty assignment fields: ${invalidFields.join(", ")}`]);
+    fatal = true;
+  }
+
+  if (invalidSupervisionFields.length === 0) results.push(["ok", "supervision contract present in assignments"]);
+  else {
+    results.push(["warn", `missing or incomplete supervision assignment fields: ${invalidSupervisionFields.join(", ")}`]);
     fatal = true;
   }
 
@@ -1616,6 +1835,7 @@ function validateRoleAssignments(text, workflowGate = { required: false }) {
 function validateRunnerPackets(text, workflowGate = { required: false }) {
   const sections = getModernRunnerPacketSections(text);
   const invalidPackets = [];
+  const invalidSupervisionPackets = [];
   const invalidMetacognitivePackets = [];
   let checked = 0;
 
@@ -1663,6 +1883,11 @@ function validateRunnerPackets(text, workflowGate = { required: false }) {
       }
     }
 
+    if (runnerPacketRequiresSupervision(section)) {
+      const supervision = validateSupervisionContractFields(section);
+      for (const missing of supervision.missing) invalidSupervisionPackets.push(`${packetLabel(section)}.${missing}`);
+    }
+
     const packetGate = runnerPacketMetacognitiveRequired(section, workflowGate);
     if (packetGate.required) {
       const gateValidation = validateMetacognitiveGateText(section);
@@ -1682,11 +1907,14 @@ function validateRunnerPackets(text, workflowGate = { required: false }) {
     }
   }
 
-  if (invalidPackets.length === 0 && invalidMetacognitivePackets.length === 0) {
+  if (invalidPackets.length === 0 && invalidSupervisionPackets.length === 0 && invalidMetacognitivePackets.length === 0) {
     return { results: [["ok", `runner packets valid (${checked} checked)`]], fatal: false };
   }
   const results = [];
   if (invalidPackets.length) results.push(["warn", `missing or empty runner packet fields: ${invalidPackets.join(", ")}`]);
+  if (invalidSupervisionPackets.length) {
+    results.push(["warn", `missing or incomplete supervision runner packet fields: ${invalidSupervisionPackets.join(", ")}`]);
+  }
   if (invalidMetacognitivePackets.length) {
     results.push(["warn", `missing or incomplete metacognitive runner packet fields: ${invalidMetacognitivePackets.join(", ")}`]);
   }
@@ -1888,6 +2116,149 @@ function validateMetacognitiveGateText(text) {
   return { valid: missing.length === 0, missing };
 }
 
+function validateSupervisionContractFields(section) {
+  const missing = [];
+  const contract = getFieldValue(section, "supervision_contract");
+  if (contract !== SUPERVISION_CONTRACT_NAME) missing.push("supervision_contract");
+
+  const heartbeat = getFieldValue(section, "supervision_heartbeat");
+  if (
+    !heartbeat
+    || !/silence before heartbeat deadline is neutral/i.test(heartbeat)
+    || !/heartbeat is telemetry, not completion evidence/i.test(heartbeat)
+  ) {
+    missing.push("supervision_heartbeat");
+  }
+
+  const noInterrupt = getFieldValue(section, "supervision_no_interrupt");
+  if (
+    !noInterrupt
+    || !/must not cancel, interrupt, retire, or replace/i.test(noInterrupt)
+    || !/no-interrupt window/i.test(noInterrupt)
+  ) {
+    missing.push("supervision_no_interrupt");
+  }
+
+  const reasons = splitList(getFieldValue(section, "supervision_retire_cancel_reasons"));
+  for (const reason of SUPERVISION_RETIRE_CANCEL_REASONS) {
+    if (!reasons.includes(reason)) missing.push(`supervision_retire_cancel_reasons.${reason}`);
+  }
+
+  const stalePath = getFieldValue(section, "supervision_stale_timeout_path");
+  if (
+    !stalePath
+    || !/missed heartbeat\s*->\s*soft ping\/status request\s*->\s*grace wait\s*->\s*stale mark\s*->\s*cancel\/replace only if still silent or invalid/i.test(stalePath)
+  ) {
+    missing.push("supervision_stale_timeout_path");
+  }
+
+  const descendants = getFieldValue(section, "supervision_descendants");
+  if (
+    !descendants
+    || !/descendants inherit supervision and cancellation rules/i.test(descendants)
+    || !/cannot expand scope\/depth\/permissions/i.test(descendants)
+  ) {
+    missing.push("supervision_descendants");
+  }
+
+  missing.push(...validateHierarchyFields(section).missing);
+  missing.push(...validateSupervisionTimingFields(section).missing);
+
+  return { valid: missing.length === 0, missing };
+}
+
+function validateHierarchyFields(section) {
+  const missing = new Set();
+  const mode = getFieldValue(section, "hierarchy_mode");
+  if (!["none", "one_level", "n_level"].includes(mode)) missing.add("hierarchy_mode");
+
+  const values = {};
+  for (const field of ["max_depth", "depth", "remaining_depth"]) {
+    const parsed = parseNonNegativeInteger(getFieldValue(section, field));
+    if (parsed === null) missing.add(field);
+    else values[field] = parsed;
+  }
+
+  if (Object.keys(values).length === 3) {
+    if (values.max_depth > MAX_HIERARCHY_DEPTH) missing.add("max_depth");
+    if (values.depth > values.max_depth) missing.add("depth");
+    if (values.remaining_depth !== values.max_depth - values.depth) missing.add("remaining_depth");
+
+    if (mode === "none") {
+      if (values.max_depth !== 0) missing.add("max_depth");
+      if (values.depth !== 0) missing.add("depth");
+      if (values.remaining_depth !== 0) missing.add("remaining_depth");
+    }
+    if (mode === "one_level" && values.max_depth !== 1) missing.add("max_depth");
+    if (mode === "n_level" && values.max_depth < 1) missing.add("max_depth");
+  }
+
+  return { valid: missing.size === 0, missing: [...missing] };
+}
+
+function validateSupervisionTimingFields(section) {
+  const missing = new Set();
+  const values = {};
+
+  for (const field of ["heartbeat_interval", "heartbeat_deadline", "max_silence", "soft_timeout", "hard_timeout", "no_interrupt_until"]) {
+    const parsed = parseFiniteIsoDurationMs(getFieldValue(section, field));
+    if (parsed === null) missing.add(field);
+    else values[field] = parsed;
+  }
+
+  if (getFieldValue(section, "cancel_reason_required") !== "true") {
+    missing.add("cancel_reason_required");
+  }
+
+  if (Object.keys(values).length === 6) {
+    if (values.heartbeat_interval > values.heartbeat_deadline) missing.add("heartbeat_interval");
+    if (values.heartbeat_deadline > values.max_silence) missing.add("heartbeat_deadline");
+    if (values.max_silence > values.soft_timeout) missing.add("max_silence");
+    if (values.soft_timeout > values.hard_timeout) missing.add("soft_timeout");
+    if (values.no_interrupt_until > values.hard_timeout) missing.add("no_interrupt_until");
+  }
+
+  return { valid: missing.size === 0, missing: [...missing] };
+}
+
+function parseNonNegativeInteger(value) {
+  const text = String(value || "").trim();
+  if (!/^(?:0|[1-9]\d*)$/.test(text)) return null;
+  const parsed = Number(text);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) return null;
+  return parsed;
+}
+
+function parseFiniteIsoDurationMs(value) {
+  const text = String(value || "").trim();
+  const match = /^P(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$/i.exec(text);
+  if (!match || !/[0-9]/.test(text)) return null;
+  const [, days = "0", hours = "0", minutes = "0", seconds = "0"] = match;
+  const values = [days, hours, minutes, seconds].map(Number);
+  if (values.some((item) => !Number.isFinite(item) || item < 0)) return null;
+  const milliseconds =
+    values[0] * 24 * 60 * 60 * 1000
+    + values[1] * 60 * 60 * 1000
+    + values[2] * 60 * 1000
+    + values[3] * 1000;
+  if (!Number.isFinite(milliseconds) || milliseconds <= 0 || milliseconds > MAX_SUPERVISION_DURATION_MS) return null;
+  return milliseconds;
+}
+
+function runnerPacketRequiresSupervision(section) {
+  if (runnerPacketUsesLegacySchema(section)) return hasAnySupervisionField(section);
+  return true;
+}
+
+function runnerPacketUsesLegacySchema(section) {
+  // Packets without work_type predate the modern runner schema; keep that narrow exemption explicit.
+  return !getFieldValue(section, "work_type");
+}
+
+function hasAnySupervisionField(section) {
+  return SUPERVISION_SCHEMA_FIELD_NAMES.some((field) => Boolean(getFieldValue(section, field)));
+}
+
 function runnerPacketMetacognitiveRequired(section, workflowGate) {
   const markerGate = getFieldValue(section, "metacognitive_gate_required") === "true"
     ? { required: true, triggers: splitList(getFieldValue(section, "metacognitive_gate_triggers")).filter((item) => item !== "none") }
@@ -2057,6 +2428,36 @@ function renderMetacognitiveGateState(gate) {
 - metacognitive_gate_triggers: ${formatTriggers(normalized)}
 - metacognitive_gate_fields: ${METACOGNITIVE_GATE_FIELDS.join(", ")}
 - metacognitive_gate_contract: ${METACOGNITIVE_GATE_CONTRACT}`;
+}
+
+function renderSupervisionSection() {
+  return `## ${SUPERVISION_CONTRACT_NAME}
+
+${renderSupervisionFields()}`;
+}
+
+function renderSupervisionFields(source = {}) {
+  const hierarchyFields = source?.hierarchyFields || DEFAULT_HIERARCHY_FIELDS;
+  const supervisionTimingFields = source?.supervisionTimingFields || DEFAULT_SUPERVISION_TIMING_FIELDS;
+  return `- supervision_contract: ${SUPERVISION_CONTRACT_NAME}
+- supervision_heartbeat: ${SUPERVISION_HEARTBEAT}
+- supervision_no_interrupt: ${SUPERVISION_NO_INTERRUPT}
+- supervision_retire_cancel_reasons: ${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}
+- supervision_stale_timeout_path: ${SUPERVISION_STALE_TIMEOUT_PATH}
+- supervision_descendants: ${SUPERVISION_DESCENDANTS}
+${renderFieldLines(hierarchyFields)}
+${renderFieldLines(supervisionTimingFields)}`;
+}
+
+function renderSupervisionPromptSection(source = {}) {
+  return `Supervision:
+${renderSupervisionFields(source)}`;
+}
+
+function renderFieldLines(fields) {
+  return Object.entries(fields)
+    .map(([field, value]) => `- ${field}: ${value}`)
+    .join("\n");
 }
 
 function renderMetacognitiveGatePacketSchema(gate) {
@@ -2346,6 +2747,59 @@ function resolveWorkType(value) {
   };
 }
 
+function resolveHierarchyFields(args = {}) {
+  const mode = args.hierarchyMode === undefined || args.hierarchyMode === null || !String(args.hierarchyMode).trim()
+    ? DEFAULT_HIERARCHY_FIELDS.hierarchy_mode
+    : singleLine(args.hierarchyMode);
+  if (!["none", "one_level", "n_level"].includes(mode)) {
+    throw new CliError("invalid --hierarchy-mode: expected none, one_level, or n_level", 1);
+  }
+
+  const defaultMaxDepth = mode === "one_level" ? "1" : DEFAULT_HIERARCHY_FIELDS.max_depth;
+  if (mode === "n_level" && (args.maxDepth === undefined || args.maxDepth === null || !String(args.maxDepth).trim())) {
+    throw new CliError("invalid --hierarchy-mode n_level: --max-depth is required", 1);
+  }
+
+  const fields = {
+    hierarchy_mode: mode,
+    max_depth: args.maxDepth === undefined ? defaultMaxDepth : singleLine(args.maxDepth),
+    depth: args.depth === undefined ? DEFAULT_HIERARCHY_FIELDS.depth : singleLine(args.depth),
+    remaining_depth: "",
+  };
+  const maxDepth = parseNonNegativeInteger(fields.max_depth);
+  const depth = parseNonNegativeInteger(fields.depth);
+  if (args.remainingDepth === undefined && maxDepth !== null && depth !== null) {
+    fields.remaining_depth = String(Math.max(maxDepth - depth, 0));
+  } else {
+    fields.remaining_depth = args.remainingDepth === undefined
+      ? DEFAULT_HIERARCHY_FIELDS.remaining_depth
+      : singleLine(args.remainingDepth);
+  }
+
+  const validation = validateHierarchyFields(renderFieldLines(fields));
+  if (!validation.valid) {
+    throw new CliError(`invalid hierarchy fields: ${validation.missing.join(", ")}`, 1);
+  }
+  return fields;
+}
+
+function resolveSupervisionTimingFields(args = {}) {
+  const fields = {
+    heartbeat_interval: args.heartbeatInterval === undefined ? DEFAULT_SUPERVISION_TIMING_FIELDS.heartbeat_interval : singleLine(args.heartbeatInterval),
+    heartbeat_deadline: args.heartbeatDeadline === undefined ? DEFAULT_SUPERVISION_TIMING_FIELDS.heartbeat_deadline : singleLine(args.heartbeatDeadline),
+    max_silence: args.maxSilence === undefined ? DEFAULT_SUPERVISION_TIMING_FIELDS.max_silence : singleLine(args.maxSilence),
+    soft_timeout: args.softTimeout === undefined ? DEFAULT_SUPERVISION_TIMING_FIELDS.soft_timeout : singleLine(args.softTimeout),
+    hard_timeout: args.hardTimeout === undefined ? DEFAULT_SUPERVISION_TIMING_FIELDS.hard_timeout : singleLine(args.hardTimeout),
+    no_interrupt_until: args.noInterruptUntil === undefined ? DEFAULT_SUPERVISION_TIMING_FIELDS.no_interrupt_until : singleLine(args.noInterruptUntil),
+    cancel_reason_required: DEFAULT_SUPERVISION_TIMING_FIELDS.cancel_reason_required,
+  };
+  const validation = validateSupervisionTimingFields(renderFieldLines(fields));
+  if (!validation.valid) {
+    throw new CliError(`invalid supervision timing fields: ${validation.missing.join(", ")}`, 1);
+  }
+  return fields;
+}
+
 function isKnownFeatureProfileId(id) {
   return id === DEFAULT_FEATURE_PROFILE || Object.prototype.hasOwnProperty.call(FEATURE_PROFILE_GUIDANCE, id);
 }
@@ -2441,9 +2895,9 @@ function printHelp() {
 
 Usage:
   node bin/coding-agents.mjs intake [--cwd <path>] [--target-cwd <path>] [--work-type <id>] --task <text> --task-id <id> --epoch <epoch> --scope <scope>
-  node bin/coding-agents.mjs assign [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] --assignment <text> --expected-output <text>
+  node bin/coding-agents.mjs assign [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] [--hierarchy-mode none|one_level|n_level] [--max-depth <n>] [--depth <n>] [--remaining-depth <n>] [--heartbeat-interval <ISO-8601 duration>] [--heartbeat-deadline <ISO-8601 duration>] [--max-silence <ISO-8601 duration>] [--soft-timeout <ISO-8601 duration>] [--hard-timeout <ISO-8601 duration>] [--no-interrupt-until <ISO-8601 duration>] --assignment <text> --expected-output <text>
   node bin/coding-agents.mjs collect [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] --status <status> [--findings <text>] [--changed-files <text>] [--verification <text>] [--blockers <text>] [--assumptions <text>] [--next <text>] [--expected-outcome <text>] [--actual-result <text>] [--reproduction-or-evidence <text>] [--failure-point <text>] [--hypothesis-branches <text>] [--source-of-truth-boundary <text>] [--plugin-contract-boundary <text>] [--generated-artifact-boundary <text>] [--before-context-effects <text>] [--after-context-effects <text>] [--cross-feature-consequences <text>] [--root-cause <text>] [--fix-summary <text>] [--verification-evidence <text>] [--skipped-checks <text>] [--unresolved-risks <text>] [--next-investigation <text>]
-  node bin/coding-agents.mjs run|orchestrate [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] --assignment <text> --expected-output <text> [--runner codex-cli] [--timeout-ms <ms>]
+  node bin/coding-agents.mjs run|orchestrate [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] [--hierarchy-mode none|one_level|n_level] [--max-depth <n>] [--depth <n>] [--remaining-depth <n>] [--heartbeat-interval <ISO-8601 duration>] [--heartbeat-deadline <ISO-8601 duration>] [--max-silence <ISO-8601 duration>] [--soft-timeout <ISO-8601 duration>] [--hard-timeout <ISO-8601 duration>] [--no-interrupt-until <ISO-8601 duration>] --assignment <text> --expected-output <text> [--runner codex-cli] [--timeout-ms <ms>]
   node bin/coding-agents.mjs verify-assignments [--cwd <path>] [--target-cwd <path>]
   node bin/coding-agents.mjs normalize-debugging-integrity [--cwd <path>] [--target-cwd <path>] [--execute]
   node bin/coding-agents.mjs handoff [--cwd <path>] [--target-cwd <path>] --task-id <id>
@@ -2457,7 +2911,7 @@ Commands:
   run/orchestrate
            Record an assignment and orchestration skeleton by default; with --runner codex-cli, spawn codex exec and record normalized results.
   verify-assignments
-           Block missing or empty task_id, epoch, scope, lifecycle, or debugging_integrity fields in assignments and runner packets.
+           Block missing or empty task_id, epoch, scope, lifecycle, supervision, or debugging_integrity fields in assignments and modern runner packets.
   normalize-debugging-integrity
            Dry-run by default. With --execute, add debugging integrity and metacognitive gate schema to existing .coding-agents files and supersede pre-gate completion claims that lack required result fields.
   handoff  Print target .coding-agents/handoff.md.
@@ -2471,12 +2925,14 @@ State:
   With --target-cwd, --cwd records the invocation cwd (or process cwd when omitted) while state and runner execution use --target-cwd.
   Existing docs/codex directories are migration input or hints only; they are never operational state fallback or write targets.
   State writes add .coding-agents/ to .git/info/exclude; .gitignore is not edited.
-  Generated assignments, handoff prompts, and runner packets carry lifecycle closure and debugging integrity rules.
-  Parent-managed child-worker prompts also suppress nested Coding Agents preflight; child workers do not ask \`coding-agents を使いますか？ [Y/n]\` or start nested Coding Agents workflows inside an assigned task_id/epoch/scope.
+  Generated assignments, handoff prompts, and runner packets carry lifecycle closure, supervision, and debugging integrity rules.
+  Parent-managed child-worker prompts also suppress nested Coding Agents preflight; child workers do not ask \`coding-agents を使いますか？ [Y/n]\` or start independent nested Coding Agents workflows inside an assigned task_id/epoch/scope. Descendant delegation is allowed only when finite hierarchy fields grant remaining_depth > 0 and inherited supervision is preserved.
+  Supervision treats silence before heartbeat deadline as neutral, forbids cancel/interrupt/retire/replace during the no-interrupt window, treats heartbeat as telemetry rather than completion evidence, requires explicit retire/cancel reasons (${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}), and uses missed heartbeat -> soft ping/status request -> grace wait -> stale mark before cancel/replace.
   Optional --feature-profile overlays provide scoped assignment guidance only. Known ids: ${knownFeatureProfileIds().join(", ")}.
   Optional --work-type is semantic command metadata. Known ids: ${knownWorkTypeIds().join(", ")}.
   --work-type auto preserves keyword/path inference. --work-type source-change and --work-type debug force the metacognitive gate for that command.
   --work-type documentation suppresses keyword/path gate inference for that command only; it does not replace debug/root-cause gates and cannot downgrade existing gate-required workflow state.
+  Optional hierarchy and supervision timing flags are packet metadata. Defaults: hierarchy_mode none, max_depth/depth/remaining_depth 0, heartbeat_interval PT15M, heartbeat_deadline PT30M, max_silence PT45M, soft_timeout PT60M, hard_timeout PT120M, and no_interrupt_until PT30M.
   With --runner codex-cli, --scope must be machine-checkable before runner.md is appended or the process launches.
   Runner machine scope grammar is "scope:v1 all" for the whole repo, or "scope:v1 paths=README.md,bin/coding-agents.mjs,tests/" for comma-separated repo-relative prefixes.
   Absolute paths in "scope:v1 paths=" are accepted only when they resolve inside the target cwd and are normalized to repo-relative prefixes.
