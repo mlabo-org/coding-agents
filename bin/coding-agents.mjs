@@ -34,7 +34,7 @@ const SUPERVISION_CONTRACT_NAME = "Subagent Supervision Contract";
 const SUPERVISION_HEARTBEAT =
   "Silence before heartbeat deadline is neutral, not failure. Heartbeat is telemetry, not completion evidence.";
 const SUPERVISION_NO_INTERRUPT =
-  "Parent must not cancel, interrupt, retire, or replace during the no-interrupt window.";
+  "Parent must not cancel, interrupt, retire, or replace a quiet worker during the no-interrupt window. Explicit completed, blocked, or failed results are not silence; collect and integrate them immediately.";
 const SUPERVISION_RETIRE_CANCEL_REASONS = [
   "completed_retire",
   "user_stop",
@@ -1834,9 +1834,11 @@ function validateRoleAssignments(text, workflowGate = { required: false }) {
 
 function validateRunnerPackets(text, workflowGate = { required: false }) {
   const sections = getModernRunnerPacketSections(text);
+  const parentIntegrationSections = sections.filter((section) => getFieldValue(section, "type") === "parent-integration");
   const invalidPackets = [];
   const invalidSupervisionPackets = [];
   const invalidMetacognitivePackets = [];
+  const uncollectedCompletedRunnerPackets = [];
   let checked = 0;
 
   for (const section of sections) {
@@ -1881,6 +1883,13 @@ function validateRunnerPackets(text, workflowGate = { required: false }) {
           invalidPackets.push(`${section.split("\n")[0].replace(/^### /, "")}.${field}`);
         }
       }
+      if (
+        isCurrentWorkflowPacket(section, workflowGate)
+        && isCompletionStatus(getFieldValue(section, "status"))
+        && !hasMatchingParentIntegration(section, parentIntegrationSections)
+      ) {
+        uncollectedCompletedRunnerPackets.push(`${packetLabel(section)}.parent-integration`);
+      }
     }
 
     if (runnerPacketRequiresSupervision(section)) {
@@ -1907,7 +1916,12 @@ function validateRunnerPackets(text, workflowGate = { required: false }) {
     }
   }
 
-  if (invalidPackets.length === 0 && invalidSupervisionPackets.length === 0 && invalidMetacognitivePackets.length === 0) {
+  if (
+    invalidPackets.length === 0
+    && invalidSupervisionPackets.length === 0
+    && invalidMetacognitivePackets.length === 0
+    && uncollectedCompletedRunnerPackets.length === 0
+  ) {
     return { results: [["ok", `runner packets valid (${checked} checked)`]], fatal: false };
   }
   const results = [];
@@ -1918,7 +1932,49 @@ function validateRunnerPackets(text, workflowGate = { required: false }) {
   if (invalidMetacognitivePackets.length) {
     results.push(["warn", `missing or incomplete metacognitive runner packet fields: ${invalidMetacognitivePackets.join(", ")}`]);
   }
+  if (uncollectedCompletedRunnerPackets.length) {
+    results.push([
+      "warn",
+      `uncollected completed runner result missing follow-up parent-integration: ${uncollectedCompletedRunnerPackets.join(", ")}`,
+    ]);
+  }
   return { results, fatal: true };
+}
+
+function isCurrentWorkflowPacket(section, workflowGate) {
+  if (!workflowGate?.taskId) return false;
+  if (getFieldValue(section, "task_id") !== workflowGate.taskId) return false;
+  if (workflowGate.epoch && getFieldValue(section, "epoch") !== workflowGate.epoch) return false;
+  if (workflowGate.scope && getFieldValue(section, "scope") !== workflowGate.scope) return false;
+  return true;
+}
+
+function hasMatchingParentIntegration(runnerSection, parentIntegrationSections) {
+  return parentIntegrationSections.some((integrationSection) =>
+    sameRunnerIdentity(runnerSection, integrationSection)
+    && packetTimestamp(integrationSection) >= packetTimestamp(runnerSection)
+  );
+}
+
+function sameRunnerIdentity(leftSection, rightSection) {
+  for (const field of ["role", "task_id", "epoch", "scope"]) {
+    if (getFieldValue(leftSection, field) !== getFieldValue(rightSection, field)) return false;
+  }
+  return featureProfileField(leftSection) === featureProfileField(rightSection)
+    && workTypeField(leftSection) === workTypeField(rightSection);
+}
+
+function featureProfileField(section) {
+  return getFieldValue(section, "feature_profile") || DEFAULT_FEATURE_PROFILE;
+}
+
+function workTypeField(section) {
+  return getFieldValue(section, "work_type") || DEFAULT_WORK_TYPE;
+}
+
+function packetTimestamp(section) {
+  const match = /^###\s+(\S+)/m.exec(section);
+  return match ? match[1] : "";
 }
 
 function getModernRunnerPacketSections(text) {
@@ -2927,7 +2983,7 @@ State:
   State writes add .coding-agents/ to .git/info/exclude; .gitignore is not edited.
   Generated assignments, handoff prompts, and runner packets carry lifecycle closure, supervision, and debugging integrity rules.
   Parent-managed child-worker prompts also suppress nested Coding Agents preflight; child workers do not ask \`coding-agents を使いますか？ [Y/n]\` or start independent nested Coding Agents workflows inside an assigned task_id/epoch/scope. Descendant delegation is allowed only when finite hierarchy fields grant remaining_depth > 0 and inherited supervision is preserved.
-  Supervision treats silence before heartbeat deadline as neutral, forbids cancel/interrupt/retire/replace during the no-interrupt window, treats heartbeat as telemetry rather than completion evidence, requires explicit retire/cancel reasons (${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}), and uses missed heartbeat -> soft ping/status request -> grace wait -> stale mark before cancel/replace.
+  Supervision treats silence before heartbeat deadline as neutral, forbids cancel/interrupt/retire/replace of quiet workers during the no-interrupt window, treats explicit completed/blocked/failed results as immediate collect/integrate triggers rather than silence, treats heartbeat as telemetry rather than completion evidence, requires explicit retire/cancel reasons (${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}), and uses missed heartbeat -> soft ping/status request -> grace wait -> stale mark before cancel/replace.
   Optional --feature-profile overlays provide scoped assignment guidance only. Known ids: ${knownFeatureProfileIds().join(", ")}.
   Optional --work-type is semantic command metadata. Known ids: ${knownWorkTypeIds().join(", ")}.
   --work-type auto preserves keyword/path inference. --work-type source-change and --work-type debug force the metacognitive gate for that command.

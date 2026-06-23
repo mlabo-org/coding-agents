@@ -354,7 +354,8 @@ test("intake generates supervision guidance in assignments and handoff", () => {
 
     const handoff = readState(repo, "handoff.md");
     assert.match(handoff, /^Supervision:$/m);
-    assert.match(handoff, /Parent must not cancel, interrupt, retire, or replace during the no-interrupt window/);
+    assert.match(handoff, /Parent must not cancel, interrupt, retire, or replace a quiet worker during the no-interrupt window/);
+    assert.match(handoff, /Explicit completed, blocked, or failed results are not silence; collect and integrate them immediately/);
     assert.match(handoff, /^- hierarchy_mode: none$/m);
     assert.match(handoff, /^- heartbeat_interval: PT15M$/m);
     assert.match(handoff, /^- cancel_reason_required: true$/m);
@@ -432,7 +433,8 @@ test("runner assignment packets carry supervision guidance", () => {
     const runner = readState(repo, "runner.md");
     assert.match(runner, /type: assignment[\s\S]*supervision_contract: Subagent Supervision Contract/);
     assert.match(runner, /type: assignment[\s\S]*supervision_heartbeat: Silence before heartbeat deadline is neutral, not failure\. Heartbeat is telemetry, not completion evidence\./);
-    assert.match(runner, /type: assignment[\s\S]*supervision_no_interrupt: Parent must not cancel, interrupt, retire, or replace during the no-interrupt window\./);
+    assert.match(runner, /type: assignment[\s\S]*supervision_no_interrupt: Parent must not cancel, interrupt, retire, or replace a quiet worker during the no-interrupt window\./);
+    assert.match(runner, /type: assignment[\s\S]*Explicit completed, blocked, or failed results are not silence; collect and integrate them immediately\./);
     assert.match(runner, /type: assignment[\s\S]*supervision_retire_cancel_reasons: completed_retire, user_stop, safety_stop, scope_violation, stale_timeout, blocker_or_failure, stale_premise/);
     assert.match(runner, /type: assignment[\s\S]*hierarchy_mode: none/);
     assert.match(runner, /type: assignment[\s\S]*heartbeat_interval: PT15M/);
@@ -629,7 +631,8 @@ const prompt = args[args.length - 1] || "";
 if (!prompt.includes("feature_profile: runner.scope-guard")) process.exit(7);
 if (!prompt.includes("optional assignment overlay, not a resident agent or spawned worker")) process.exit(8);
 if (!prompt.includes("Silence before heartbeat deadline is neutral, not failure")) process.exit(9);
-if (!prompt.includes("Parent must not cancel, interrupt, retire, or replace during the no-interrupt window")) process.exit(10);
+if (!prompt.includes("Parent must not cancel, interrupt, retire, or replace a quiet worker during the no-interrupt window")) process.exit(10);
+if (!prompt.includes("Explicit completed, blocked, or failed results are not silence; collect and integrate them immediately")) process.exit(15);
 if (!prompt.includes("missed heartbeat -> soft ping/status request -> grace wait -> stale mark")) process.exit(11);
 if (!prompt.includes("hierarchy_mode: none")) process.exit(12);
 if (!prompt.includes("heartbeat_interval: PT15M")) process.exit(13);
@@ -676,6 +679,87 @@ process.stdout.write("fake codex completed\\n");
     assert.match(runner, /type: process-runner-result[\s\S]*hierarchy_mode: none/);
     assert.match(runner, /type: process-runner-result[\s\S]*hard_timeout: PT120M/);
     assert.match(runner, /summary: runner prompt included feature_profile: runner\.scope-guard and supervision/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(fakeBin, { recursive: true, force: true });
+  }
+});
+
+test("verify rejects completed codex-cli runner results until parent integration is collected", () => {
+  const repo = makeTempGitRepo();
+  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
+  try {
+    intake(repo, {
+      task: "Probe uncollected completed runner result",
+      taskId: "uncollected-runner",
+      epoch: "e1",
+      scope: "README.md",
+      workType: "documentation",
+    });
+    installFakeCodex(fakeBin, "runner produced parent integration material\\n");
+
+    const run = runCli([
+      "run",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "uncollected-runner",
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+      "--work-type",
+      "documentation",
+      "--assignment",
+      "complete the documentation task",
+      "--expected-output",
+      "parent integration material",
+      "--runner",
+      "codex-cli",
+    ], {
+      env: pathWithFakeCodex(fakeBin),
+    });
+
+    assert.equal(run.status, 0, run.stderr);
+    let runner = readState(repo, "runner.md");
+    assert.match(runner, /type: process-runner-result[\s\S]*status: completed/);
+    assert.doesNotMatch(runner, /type: parent-integration/);
+
+    const uncollected = runCli(["verify-assignments", "--target-cwd", repo]);
+    assert.notEqual(uncollected.status, 0);
+    assert.match(uncollected.stdout, /uncollected completed runner result missing follow-up parent-integration/);
+
+    const collect = runCli([
+      "collect",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "uncollected-runner",
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+      "--work-type",
+      "documentation",
+      "--status",
+      "completed",
+      "--findings",
+      "runner result was collected",
+      "--verification",
+      "parent integration recorded",
+      "--next",
+      "retire completed subagent",
+    ]);
+    assert.equal(collect.status, 0, collect.stderr);
+
+    runner = readState(repo, "runner.md");
+    assert.match(runner, /type: parent-integration[\s\S]*status: completed/);
+    assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
+    assert.equal(runCli(["doctor", "--target-cwd", repo]).status, 0);
   } finally {
     rmSync(repo, { recursive: true, force: true });
     rmSync(fakeBin, { recursive: true, force: true });
