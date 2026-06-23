@@ -35,6 +35,8 @@ const SUPERVISION_HEARTBEAT =
   "Silence before heartbeat deadline is neutral, not failure. Heartbeat is telemetry, not completion evidence.";
 const SUPERVISION_NO_INTERRUPT =
   "Parent must not cancel, interrupt, retire, or replace a quiet worker during the no-interrupt window. Explicit completed, blocked, or failed results are not silence; collect and integrate them immediately.";
+const SUPERVISION_SELF_REPORT =
+  "If still running at heartbeat_interval, self-report progress with fields completed/current/blocker/ETA; use blocker: none and ETA: unknown when unknown.";
 const SUPERVISION_RETIRE_CANCEL_REASONS = [
   "completed_retire",
   "user_stop",
@@ -70,6 +72,7 @@ const PROSE_SUPERVISION_FIELD_NAMES = [
   "supervision_contract",
   "supervision_heartbeat",
   "supervision_no_interrupt",
+  "supervision_self_report",
   "supervision_retire_cancel_reasons",
   "supervision_stale_timeout_path",
   "supervision_descendants",
@@ -2195,6 +2198,17 @@ function validateSupervisionContractFields(section) {
     missing.push("supervision_no_interrupt");
   }
 
+  const selfReport = getFieldValue(section, "supervision_self_report");
+  if (
+    !selfReport
+    || !/still running at heartbeat_interval/i.test(selfReport)
+    || !/completed\/current\/blocker\/ETA/.test(selfReport)
+    || !/blocker: none/i.test(selfReport)
+    || !/ETA: unknown/.test(selfReport)
+  ) {
+    missing.push("supervision_self_report");
+  }
+
   const reasons = splitList(getFieldValue(section, "supervision_retire_cancel_reasons"));
   for (const reason of SUPERVISION_RETIRE_CANCEL_REASONS) {
     if (!reasons.includes(reason)) missing.push(`supervision_retire_cancel_reasons.${reason}`);
@@ -2498,6 +2512,7 @@ function renderSupervisionFields(source = {}) {
   return `- supervision_contract: ${SUPERVISION_CONTRACT_NAME}
 - supervision_heartbeat: ${SUPERVISION_HEARTBEAT}
 - supervision_no_interrupt: ${SUPERVISION_NO_INTERRUPT}
+- supervision_self_report: ${SUPERVISION_SELF_REPORT}
 - supervision_retire_cancel_reasons: ${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}
 - supervision_stale_timeout_path: ${SUPERVISION_STALE_TIMEOUT_PATH}
 - supervision_descendants: ${SUPERVISION_DESCENDANTS}
@@ -2983,7 +2998,7 @@ State:
   State writes add .coding-agents/ to .git/info/exclude; .gitignore is not edited.
   Generated assignments, handoff prompts, and runner packets carry lifecycle closure, supervision, and debugging integrity rules.
   Parent-managed child-worker prompts also suppress nested Coding Agents preflight; child workers do not ask \`coding-agents を使いますか？ [Y/n]\` or start independent nested Coding Agents workflows inside an assigned task_id/epoch/scope. Descendant delegation is allowed only when finite hierarchy fields grant remaining_depth > 0 and inherited supervision is preserved.
-  Supervision treats silence before heartbeat deadline as neutral, forbids cancel/interrupt/retire/replace of quiet workers during the no-interrupt window, treats explicit completed/blocked/failed results as immediate collect/integrate triggers rather than silence, treats heartbeat as telemetry rather than completion evidence, requires explicit retire/cancel reasons (${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}), and uses missed heartbeat -> soft ping/status request -> grace wait -> stale mark before cancel/replace.
+  Supervision treats silence before heartbeat deadline as neutral, forbids cancel/interrupt/retire/replace of quiet workers during the no-interrupt window, requires workers that are still running at heartbeat_interval to self-report completed/current/blocker/ETA progress, treats explicit completed/blocked/failed results as immediate collect/integrate triggers rather than silence, treats heartbeat as telemetry rather than completion evidence, requires explicit retire/cancel reasons (${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}), and uses missed heartbeat -> soft ping/status request -> grace wait -> stale mark before cancel/replace.
   Optional --feature-profile overlays provide scoped assignment guidance only. Known ids: ${knownFeatureProfileIds().join(", ")}.
   Optional --work-type is semantic command metadata. Known ids: ${knownWorkTypeIds().join(", ")}.
   --work-type auto preserves keyword/path inference. --work-type source-change and --work-type debug force the metacognitive gate for that command.

@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CLI = path.join(REPO_ROOT, "bin", "coding-agents.mjs");
+const SELF_REPORT_GUIDANCE =
+  /If still running at heartbeat_interval, self-report progress with fields completed\/current\/blocker\/ETA; use blocker: none and ETA: unknown when unknown\./;
 
 test("runner commands require matching intake state before writing runner state", () => {
   const repo = makeTempGitRepo();
@@ -93,6 +95,7 @@ test("handoff validates requested task id before printing the handoff body", () 
     const current = runCli(["handoff", "--target-cwd", repo, "--task-id", "handoff-current"]);
     assert.equal(current.status, 0, current.stderr);
     assert.match(current.stdout, /# Handoff Prompt/);
+    assert.match(current.stdout, SELF_REPORT_GUIDANCE);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -347,6 +350,7 @@ test("intake generates supervision guidance in assignments and handoff", () => {
     assert.match(assignments, /## Subagent Supervision Contract/);
     assert.match(assignments, /Silence before heartbeat deadline is neutral, not failure/);
     assert.match(assignments, /Heartbeat is telemetry, not completion evidence/);
+    assert.match(assignments, SELF_REPORT_GUIDANCE);
     assert.match(assignments, /completed_retire, user_stop, safety_stop, scope_violation, stale_timeout, blocker_or_failure, stale_premise/);
     assert.match(assignments, /missed heartbeat -> soft ping\/status request -> grace wait -> stale mark -> cancel\/replace only if still silent or invalid/);
     assert.match(assignments, /descendants inherit supervision and cancellation rules; they cannot expand scope\/depth\/permissions/);
@@ -356,6 +360,7 @@ test("intake generates supervision guidance in assignments and handoff", () => {
     assert.match(handoff, /^Supervision:$/m);
     assert.match(handoff, /Parent must not cancel, interrupt, retire, or replace a quiet worker during the no-interrupt window/);
     assert.match(handoff, /Explicit completed, blocked, or failed results are not silence; collect and integrate them immediately/);
+    assert.match(handoff, SELF_REPORT_GUIDANCE);
     assert.match(handoff, /^- hierarchy_mode: none$/m);
     assert.match(handoff, /^- heartbeat_interval: PT15M$/m);
     assert.match(handoff, /^- cancel_reason_required: true$/m);
@@ -435,6 +440,7 @@ test("runner assignment packets carry supervision guidance", () => {
     assert.match(runner, /type: assignment[\s\S]*supervision_heartbeat: Silence before heartbeat deadline is neutral, not failure\. Heartbeat is telemetry, not completion evidence\./);
     assert.match(runner, /type: assignment[\s\S]*supervision_no_interrupt: Parent must not cancel, interrupt, retire, or replace a quiet worker during the no-interrupt window\./);
     assert.match(runner, /type: assignment[\s\S]*Explicit completed, blocked, or failed results are not silence; collect and integrate them immediately\./);
+    assert.match(runner, /type: assignment[\s\S]*If still running at heartbeat_interval, self-report progress with fields completed\/current\/blocker\/ETA; use blocker: none and ETA: unknown when unknown\./);
     assert.match(runner, /type: assignment[\s\S]*supervision_retire_cancel_reasons: completed_retire, user_stop, safety_stop, scope_violation, stale_timeout, blocker_or_failure, stale_premise/);
     assert.match(runner, /type: assignment[\s\S]*hierarchy_mode: none/);
     assert.match(runner, /type: assignment[\s\S]*heartbeat_interval: PT15M/);
@@ -633,6 +639,7 @@ if (!prompt.includes("optional assignment overlay, not a resident agent or spawn
 if (!prompt.includes("Silence before heartbeat deadline is neutral, not failure")) process.exit(9);
 if (!prompt.includes("Parent must not cancel, interrupt, retire, or replace a quiet worker during the no-interrupt window")) process.exit(10);
 if (!prompt.includes("Explicit completed, blocked, or failed results are not silence; collect and integrate them immediately")) process.exit(15);
+if (!prompt.includes("If still running at heartbeat_interval, self-report progress with fields completed/current/blocker/ETA; use blocker: none and ETA: unknown when unknown.")) process.exit(16);
 if (!prompt.includes("missed heartbeat -> soft ping/status request -> grace wait -> stale mark")) process.exit(11);
 if (!prompt.includes("hierarchy_mode: none")) process.exit(12);
 if (!prompt.includes("heartbeat_interval: PT15M")) process.exit(13);
@@ -2021,7 +2028,8 @@ function modernPacketFollowedByLegacyRunnerPacket(taskId) {
 function supervisionFieldLines() {
   return `- supervision_contract: Subagent Supervision Contract
 - supervision_heartbeat: Silence before heartbeat deadline is neutral, not failure. Heartbeat is telemetry, not completion evidence.
-- supervision_no_interrupt: Parent must not cancel, interrupt, retire, or replace during the no-interrupt window.
+- supervision_no_interrupt: Parent must not cancel, interrupt, retire, or replace a quiet worker during the no-interrupt window. Explicit completed, blocked, or failed results are not silence; collect and integrate them immediately.
+- supervision_self_report: If still running at heartbeat_interval, self-report progress with fields completed/current/blocker/ETA; use blocker: none and ETA: unknown when unknown.
 - supervision_retire_cancel_reasons: completed_retire, user_stop, safety_stop, scope_violation, stale_timeout, blocker_or_failure, stale_premise
 - supervision_stale_timeout_path: missed heartbeat -> soft ping/status request -> grace wait -> stale mark -> cancel/replace only if still silent or invalid
 - supervision_descendants: For permitted nested depth, descendants inherit supervision and cancellation rules; they cannot expand scope/depth/permissions.
@@ -2061,6 +2069,7 @@ function stripTimingLines(text) {
 
 function assertSupervisionSchema(text) {
   assert.match(text, /^- supervision_contract: Subagent Supervision Contract$/m);
+  assert.match(text, SELF_REPORT_GUIDANCE);
   assert.match(text, /^- hierarchy_mode: none$/m);
   assert.match(text, /^- max_depth: 0$/m);
   assert.match(text, /^- depth: 0$/m);
