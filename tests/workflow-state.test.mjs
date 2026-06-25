@@ -10,6 +10,8 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 const CLI = path.join(REPO_ROOT, "bin", "coding-agents.mjs");
 const SELF_REPORT_GUIDANCE =
   /If still running at heartbeat_interval, self-report progress with fields completed\/current\/blocker\/ETA; use blocker: none and ETA: unknown when unknown\./;
+const CODING_CONDUCT_RULES =
+  /coding_conduct_rules: .*GitHub\/npm OSS.*do not reimplement.*first principles.*fallback implementations.*main-flow errors/;
 
 test("runner commands require matching intake state before writing runner state", () => {
   const repo = makeTempGitRepo();
@@ -327,7 +329,7 @@ test("intake describes fixed roles as scaffold, not resident agents", () => {
     const assignments = readState(repo, "assignments.md");
     assert.match(assignments, /# Role Assignment Scaffold/);
     assert.match(assignments, /not resident agents or spawned workers/);
-    assert.equal([...assignments.matchAll(/^## (?!Debugging|Meta-Cognitive|Nested|Subagent)(.+)$/gm)].length, 14);
+    assert.equal([...assignments.matchAll(/^## (?!Debugging|Coding Conduct|Meta-Cognitive|Nested|Subagent)(.+)$/gm)].length, 14);
     assert.match(assignments, /- status: scaffolded/);
 
     const verify = runCli(["verify-assignments", "--target-cwd", repo]);
@@ -354,7 +356,11 @@ test("intake generates supervision guidance in assignments and handoff", () => {
     assert.match(assignments, /completed_retire, user_stop, safety_stop, scope_violation, stale_timeout, blocker_or_failure, stale_premise/);
     assert.match(assignments, /missed heartbeat -> soft ping\/status request -> grace wait -> stale mark -> cancel\/replace only if still silent or invalid/);
     assert.match(assignments, /descendants inherit supervision and cancellation rules; they cannot expand scope\/depth\/permissions/);
+    assert.match(assignments, /## Coding Conduct Gate/);
+    assert.match(assignments, /coding_conduct_gate: Coding Conduct Gate/);
+    assert.match(assignments, CODING_CONDUCT_RULES);
     assertSupervisionSchema(implementer);
+    assert.match(implementer, CODING_CONDUCT_RULES);
 
     const handoff = readState(repo, "handoff.md");
     assert.match(handoff, /^Supervision:$/m);
@@ -364,6 +370,8 @@ test("intake generates supervision guidance in assignments and handoff", () => {
     assert.match(handoff, /^- hierarchy_mode: none$/m);
     assert.match(handoff, /^- heartbeat_interval: PT15M$/m);
     assert.match(handoff, /^- cancel_reason_required: true$/m);
+    assert.match(handoff, /^Coding Conduct Gate:$/m);
+    assert.match(handoff, CODING_CONDUCT_RULES);
     assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
     assert.equal(runCli(["doctor", "--target-cwd", repo]).status, 0);
   } finally {
@@ -398,7 +406,7 @@ test("feature profiles are optional overlays and do not change the fixed 14-role
     assert.equal(assigned.status, 0, assigned.stderr);
 
     const assignments = readState(repo, "assignments.md");
-    assert.equal([...assignments.matchAll(/^## (?!Debugging|Meta-Cognitive|Nested|Subagent)(.+)$/gm)].length, 14);
+    assert.equal([...assignments.matchAll(/^## (?!Debugging|Coding Conduct|Meta-Cognitive|Nested|Subagent)(.+)$/gm)].length, 14);
     assert.doesNotMatch(assignments, /workflow\.state-safety/);
     assert.doesNotMatch(assignments, /^## workflow\.state-safety$/m);
 
@@ -442,6 +450,8 @@ test("runner assignment packets carry supervision guidance", () => {
     assert.match(runner, /type: assignment[\s\S]*Explicit completed, blocked, or failed results are not silence; collect and integrate them immediately\./);
     assert.match(runner, /type: assignment[\s\S]*If still running at heartbeat_interval, self-report progress with fields completed\/current\/blocker\/ETA; use blocker: none and ETA: unknown when unknown\./);
     assert.match(runner, /type: assignment[\s\S]*supervision_retire_cancel_reasons: completed_retire, user_stop, safety_stop, scope_violation, stale_timeout, blocker_or_failure, stale_premise/);
+    assert.match(runner, /type: assignment[\s\S]*coding_conduct_gate: Coding Conduct Gate/);
+    assert.match(runner, new RegExp(`type: assignment[\\s\\S]*${CODING_CONDUCT_RULES.source}`));
     assert.match(runner, /type: assignment[\s\S]*hierarchy_mode: none/);
     assert.match(runner, /type: assignment[\s\S]*heartbeat_interval: PT15M/);
     assert.match(runner, /type: assignment[\s\S]*cancel_reason_required: true/);
@@ -640,6 +650,9 @@ if (!prompt.includes("Silence before heartbeat deadline is neutral, not failure"
 if (!prompt.includes("Parent must not cancel, interrupt, retire, or replace a quiet worker during the no-interrupt window")) process.exit(10);
 if (!prompt.includes("Explicit completed, blocked, or failed results are not silence; collect and integrate them immediately")) process.exit(15);
 if (!prompt.includes("If still running at heartbeat_interval, self-report progress with fields completed/current/blocker/ETA; use blocker: none and ETA: unknown when unknown.")) process.exit(16);
+if (!prompt.includes("Reuse mature GitHub/npm OSS directly")) process.exit(17);
+if (!prompt.includes("Start bug analysis from first principles")) process.exit(18);
+if (!prompt.includes("Do not add fallback implementations that hide main-flow errors")) process.exit(19);
 if (!prompt.includes("missed heartbeat -> soft ping/status request -> grace wait -> stale mark")) process.exit(11);
 if (!prompt.includes("hierarchy_mode: none")) process.exit(12);
 if (!prompt.includes("heartbeat_interval: PT15M")) process.exit(13);
@@ -1062,6 +1075,48 @@ test("validation rejects modern runner packets missing machine timing fields", (
     const doctor = runCli(["doctor", "--target-cwd", repo]);
     assert.notEqual(doctor.status, 0);
     assert.match(doctor.stdout, /hard_timeout/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("validation rejects workflow state missing coding conduct fields", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, { taskId: "conduct-missing", epoch: "e1", scope: "README.md" });
+    const assignmentsPath = path.join(repo, ".coding-agents", "assignments.md");
+    writeFileSync(assignmentsPath, stripCodingConductLines(readFileSync(assignmentsPath, "utf8")), "utf8");
+
+    const assignmentVerify = runCli(["verify-assignments", "--target-cwd", repo]);
+    assert.notEqual(assignmentVerify.status, 0);
+    assert.match(assignmentVerify.stdout, /coding conduct assignment fields/);
+
+    intake(repo, { taskId: "conduct-runner-missing", epoch: "e1", scope: "README.md" });
+    const assigned = runCli([
+      "assign",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "conduct-runner-missing",
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+      "--assignment",
+      "record an assignment packet",
+      "--expected-output",
+      "assignment packet",
+    ]);
+    assert.equal(assigned.status, 0, assigned.stderr);
+
+    const runnerPath = path.join(repo, ".coding-agents", "runner.md");
+    writeFileSync(runnerPath, stripCodingConductLines(readFileSync(runnerPath, "utf8")), "utf8");
+
+    const runnerVerify = runCli(["verify-assignments", "--target-cwd", repo]);
+    assert.notEqual(runnerVerify.status, 0);
+    assert.match(runnerVerify.stdout, /coding conduct runner packet fields/);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -2004,6 +2059,7 @@ function modernRunnerPacket(taskId) {
 - expected_output: assignment packet
 - nested_coding_agents_preflight: parent already selected Coding Agents
 - debugging_integrity: debug work requires root cause and verification
+${codingConductFieldLines()}
 ${supervisionFieldLines()}
 - lifecycle: return concise parent-integration material, then stop
 `;
@@ -2046,10 +2102,22 @@ function supervisionFieldLines() {
 - cancel_reason_required: true`;
 }
 
+function codingConductFieldLines() {
+  return `- coding_conduct_gate: Coding Conduct Gate
+- coding_conduct_rules: Reuse mature GitHub/npm OSS directly when it fits the requirement and dependency approval or scope permits it; do not reimplement mature solved problems. | Start bug analysis from first principles: expected outcome, actual behavior, invariants, inputs, execution path, evidence, and competing hypotheses before choosing a fix. | Do not add fallback implementations that hide main-flow errors; fix the main flow or report unresolved status or explicit user-approved temporary containment.`;
+}
+
 function stripSupervisionLines(text) {
   return text
     .split(/\r?\n/)
     .filter((line) => !/^- supervision_/.test(line))
+    .join("\n");
+}
+
+function stripCodingConductLines(text) {
+  return text
+    .split(/\r?\n/)
+    .filter((line) => !/^- coding_conduct_/.test(line))
     .join("\n");
 }
 

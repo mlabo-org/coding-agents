@@ -19,6 +19,13 @@ const CHILD_RETURN_LIFECYCLE =
   "Return concise parent-integration material and stop; do not stay open waiting for more work.";
 const DEBUG_INTEGRITY =
   "For debug or repair work, identify root cause and make the intended outcome succeed; log-only, fallback-only, skip-only, failure-output-only, or return-to-main-loop-only changes are not completion.";
+const CODING_CONDUCT_GATE_NAME = "Coding Conduct Gate";
+const CODING_CONDUCT_RULES = [
+  "Reuse mature GitHub/npm OSS directly when it fits the requirement and dependency approval or scope permits it; do not reimplement mature solved problems.",
+  "Start bug analysis from first principles: expected outcome, actual behavior, invariants, inputs, execution path, evidence, and competing hypotheses before choosing a fix.",
+  "Do not add fallback implementations that hide main-flow errors; fix the main flow or report unresolved status or explicit user-approved temporary containment.",
+];
+const CODING_CONDUCT_CONTRACT = CODING_CONDUCT_RULES.join(" ");
 const METACOGNITIVE_GATE_NAME = "Meta-Cognitive Debug/Repair Gate";
 const METACOGNITIVE_GATE_CONTRACT =
   "For gate-required source-change/debug/repair/SOT/plugin-contract/generated-artifact inconsistency work, explicitly capture before/after context effects, cross-feature consequences, root cause, fix, verification evidence, skipped checks, unresolved risks, and next investigation.";
@@ -517,6 +524,8 @@ Boundaries:
 - Do not claim success for unavailable, skipped, or failed checks.
 - ${renderFeatureProfilePromptGuidance(packet)}
 - ${DEBUG_INTEGRITY}
+${CODING_CONDUCT_GATE_NAME}:
+${renderCodingConductFields()}
 ${renderRunnerPromptMetacognitiveGate(packet)}
 
 ${renderSupervisionPromptSection(packet)}
@@ -705,6 +714,7 @@ Operational log:
 - ${NESTED_CODING_AGENTS_PREFLIGHT}
 - ${SUPERVISION_HEARTBEAT}
 - ${SUPERVISION_NO_INTERRUPT}
+- ${CODING_CONDUCT_CONTRACT}
 - ${DEBUG_INTEGRITY}
 ${renderMetacognitiveGateState(context.metacognitiveGate)}
 `;
@@ -735,6 +745,10 @@ function renderTask(context) {
 - work_type: ${workTypeId(context)}
 - task: ${context.task}
 
+## ${CODING_CONDUCT_GATE_NAME}
+
+${renderCodingConductFields()}
+
 ## ${METACOGNITIVE_GATE_NAME}
 
 ${renderMetacognitiveGateState(context.metacognitiveGate)}
@@ -746,6 +760,7 @@ ${renderMetacognitiveGateState(context.metacognitiveGate)}
 - Each generated assignment carries lifecycle guidance requiring concise integration material and prompt close/retire handling.
 - Each generated child-worker prompt, assignment, handoff, and runner packet carries the nested Coding Agents preflight suppression rule.
 - Each generated child-worker prompt, assignment, handoff, and modern runner packet carries the ${SUPERVISION_CONTRACT_NAME}.
+- Each generated assignment, handoff, and modern runner packet carries the ${CODING_CONDUCT_GATE_NAME}.
 - Debug or repair work is not complete until root cause is identified, fixed, and verified against the intended outcome.
 - If \`metacognitive_gate_required: true\`, assignments, runner prompts, runner packets, and completed parent-integration packets must carry all metacognitive gate fields.
 - Handoff prompt is available for the next worker.
@@ -784,7 +799,7 @@ function renderDecisions(context) {
 ## D-${context.taskId}-004 Debugging Integrity
 
 - accepted: debug or repair work must identify root cause and restore the intended outcome.
-- impact: log-only, fallback-only, skip-only, failure-output-only, and return-to-main-loop-only changes are temporary containment at most and must not be accepted as completion.
+- impact: log-only, fallback-only, skip-only, failure-output-only, and return-to-main-loop-only changes are not completion; fallback implementations that hide main-flow errors are prohibited unless the user explicitly requests temporary containment and the unresolved root cause remains visible.
 
 ## D-${context.taskId}-005 Nested Coding Agents Preflight Suppression
 
@@ -803,6 +818,11 @@ function renderDecisions(context) {
 - accepted: silence before heartbeat deadline is neutral, and heartbeat is telemetry rather than completion evidence.
 - retire_cancel_reasons: ${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}
 - impact: parent does not cancel, interrupt, retire, or replace a quiet worker during the no-interrupt window; stale timeout requires missed heartbeat, soft ping/status request, grace wait, stale mark, and only then cancel/replace if still silent or invalid.
+
+## D-${context.taskId}-008 ${CODING_CONDUCT_GATE_NAME}
+
+${renderCodingConductFields()}
+- impact: coding and debug assignments must prefer mature OSS reuse over reimplementation, start bug analysis from first principles, and reject fallback implementations that hide main-flow errors.
 `;
 }
 
@@ -829,6 +849,7 @@ function renderAudit(context) {
 - Run implementation checks for the active task.
 - Record skipped checks with reasons.
 - Record any retire/cancel action with one explicit reason from ${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}.
+- Record ${CODING_CONDUCT_GATE_NAME} checks, including OSS reuse decision, first-principles bug analysis when applicable, and no hidden fallback implementation.
 - For debug or repair work, record root cause, fix, and verification that the intended outcome now succeeds.
 - If metacognitive_gate_required is true, record ${METACOGNITIVE_GATE_FIELDS.join(", ")}.
 `;
@@ -838,18 +859,18 @@ function renderAssignments(context) {
   const assignments = {
     Intake: ["scaffolded", "Confirm project instructions, cwd, task, existing workflow state, and whether this is debug or repair work.", "Intake summary with blockers and debug classification."],
     "Repo Mapper": ["scaffolded", "Map repository structure and likely edit boundaries.", "Repo map and source boundaries."],
-    Requirements: ["scaffolded", "Extract explicit requirements, non-goals, expected outcome, and actual failure when debugging.", "Requirement list with ambiguity notes and failure contract if applicable."],
+    Requirements: ["scaffolded", "Extract explicit requirements, non-goals, expected outcome, actual failure when debugging, and whether mature GitHub/npm OSS already solves the requirement.", "Requirement list with ambiguity notes, OSS reuse decision, and failure contract if applicable."],
     Planner: ["scaffolded", "Convert requirements into an executable task sequence.", "Plan with ordered checkpoints."],
     Architect: ["scaffolded", "Identify design constraints, integration points, and likely failure point for debug work.", "Architecture notes, risk points, and failure-path notes."],
-    Implementer: ["scaffolded", "Make scoped code or document changes when requested; for debug work, fix the root cause instead of masking failure.", "Changed files, implementation notes, and root-cause fix notes when applicable."],
+    Implementer: ["scaffolded", "Make scoped code or document changes when requested; reuse mature OSS when approved and suitable, and for debug work fix the root cause instead of masking failure with fallback implementation.", "Changed files, OSS reuse or non-reuse rationale, implementation notes, and root-cause fix notes when applicable."],
     "Test Runner": ["scaffolded", "Run allowed verification commands; for debug work, verify the intended outcome now succeeds.", "Verification output, skipped checks, and outcome evidence."],
-    Reviewer: ["scaffolded", "Review diffs for regressions, missing requirements, and log-only or fallback-only debug completion.", "Findings ordered by severity."],
+    Reviewer: ["scaffolded", "Review diffs for regressions, missing requirements, avoidable reimplementation of mature OSS, and fallback implementations that hide main-flow errors.", "Findings ordered by severity."],
     "Risk Guard": ["scaffolded", "Check destructive actions, external sending, secrets, and scope drift.", "Risk assessment and required stops."],
     "Docs Keeper": ["scaffolded", `Keep ${STATE_DIR_NAME} task, todo, decisions, and audit current.`, "Updated docs summary."],
     UX: ["scaffolded", "Assess user-facing workflow clarity.", "UX notes and friction points."],
-    Dependency: ["scaffolded", "Check dependency boundaries and avoid unapproved installs.", "Dependency impact notes."],
+    Dependency: ["scaffolded", "Check whether mature GitHub/npm OSS should be reused directly, verify dependency approval and scope boundaries, and avoid unapproved installs.", "Dependency impact notes and OSS reuse recommendation."],
     DevOps: ["scaffolded", "Check runnable commands, Git state, and release boundaries.", "Operational readiness notes."],
-    Auditor: ["scaffolded", "Compare outcomes against task_id, epoch, scope, completion conditions, and the debugging integrity gate.", "Final audit result with debug root-cause status when applicable."],
+    Auditor: ["scaffolded", `Compare outcomes against task_id, epoch, scope, completion conditions, the ${CODING_CONDUCT_GATE_NAME}, and the debugging integrity gate.`, "Final audit result with OSS reuse decision, no-hidden-fallback status, and debug root-cause status when applicable."],
   };
 
   return `# Role Assignment Scaffold
@@ -859,7 +880,11 @@ These 14 sections are stable validation and routing slots. They are not resident
 ## Debugging Integrity Gate
 
 - ${DEBUG_INTEGRITY}
-- For debug or repair tasks, integration material must include expected outcome, actual failure, reproduction path, failure point, root cause, fix, and verification.
+- For debug or repair tasks, integration material must start from first principles and include expected outcome, actual failure, reproduction path, failure point, competing hypotheses, root cause, fix, and verification.
+
+## ${CODING_CONDUCT_GATE_NAME}
+
+${renderCodingConductFields()}
 
 ## ${METACOGNITIVE_GATE_NAME}
 
@@ -882,6 +907,7 @@ ${ROLES.map((role) => {
 - scope: ${context.scope}
 - assignment: ${assignment}
 - expected_output: ${expectedOutput}
+${renderCodingConductFields()}
 ${renderSupervisionFields()}
 ${renderMetacognitiveGatePacketSchema(context.metacognitiveGate)}
 - lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
@@ -912,8 +938,12 @@ ${renderSupervisionPromptSection()}
 
 Debugging integrity:
 - ${DEBUG_INTEGRITY}
-- If root cause remains unknown, report unresolved or temporary containment and name the next investigation step.
+- Analyze bugs from first principles before choosing a fix: expected outcome, actual behavior, invariants, inputs, execution path, evidence, and competing hypotheses.
+- Do not add fallback implementations that hide main-flow errors; if root cause remains unknown, report unresolved status or explicit user-approved temporary containment and name the next investigation step.
 - Separate root cause, fix, and verification in debug or repair summaries.
+
+${CODING_CONDUCT_GATE_NAME}:
+${renderCodingConductFields()}
 
 ${METACOGNITIVE_GATE_NAME}:
 ${renderMetacognitiveGateState(context.metacognitiveGate)}
@@ -949,6 +979,7 @@ function normalizeReadmeDebugIntegrity(text, context = {}) {
     );
   }
   next = normalizeReadmeSupervision(next);
+  next = normalizeDocumentCodingConduct(next);
   return normalizeDocumentMetacognitiveGate(next, context.workflowGate);
 }
 
@@ -967,6 +998,7 @@ function normalizeTaskDebugIntegrity(text, context = {}) {
     next = insertAfterLineMatching(next, new RegExp(`^${escapeRegExp(lifecycleLine)}$`, "m"), block, block);
   }
   next = normalizeTaskSupervision(next);
+  next = normalizeTaskCodingConduct(next);
   return normalizeTaskMetacognitiveGate(next, context.workflowGate);
 }
 
@@ -985,6 +1017,7 @@ function normalizeAuditDebugIntegrity(text, context = {}) {
     );
   }
   next = normalizeAuditSupervision(next);
+  next = normalizeAuditCodingConduct(next);
   return next;
 }
 
@@ -993,8 +1026,9 @@ function normalizeAssignmentsDebugIntegrity(text, context = {}) {
   const block = `## Debugging Integrity Gate
 
 - ${DEBUG_INTEGRITY}
-- For debug or repair tasks, integration material must include expected outcome, actual failure, reproduction path, failure point, root cause, fix, and verification.`;
+- For debug or repair tasks, integration material must start from first principles and include expected outcome, actual failure, reproduction path, failure point, competing hypotheses, root cause, fix, and verification.`;
   if (!next.includes(DEBUG_INTEGRITY)) next = insertAfterRoleScaffoldHeading(next, block);
+  next = normalizeAssignmentsCodingConduct(next);
   next = normalizeAssignmentsSupervision(next);
   return normalizeAssignmentsMetacognitiveGate(next, context.workflowGate);
 }
@@ -1013,6 +1047,7 @@ function normalizeHandoffDebugIntegrity(text, context = {}) {
     }
   }
   next = normalizeHandoffSupervision(next);
+  next = normalizeHandoffCodingConduct(next);
   return normalizeDocumentMetacognitiveGate(next, context.workflowGate);
 }
 
@@ -1027,6 +1062,7 @@ function normalizeRunnerDebugIntegrity(text, context = {}) {
     );
   }
   next = normalizeRunnerPreambleSupervision(next);
+  next = normalizeRunnerPreambleCodingConduct(next);
 
   const packets = getModernRunnerPacketSections(next);
   if (!packets.length) return normalizeDocumentMetacognitiveGate(next, context.workflowGate);
@@ -1042,7 +1078,7 @@ function normalizeRunnerDebugIntegrity(text, context = {}) {
     if (packetStart === -1) continue;
     normalizedPackets += next.slice(cursor, packetStart);
     normalizedPackets += normalizeRunnerPacketMetacognitiveGate(
-      normalizeRunnerPacketSupervision(normalizeRunnerPacketDebugIntegrity(packet)),
+      normalizeRunnerPacketSupervision(normalizeRunnerPacketCodingConduct(normalizeRunnerPacketDebugIntegrity(packet))),
       context.workflowGate,
     );
     cursor = packetStart + packet.length;
@@ -1057,6 +1093,74 @@ function normalizeRunnerPacketDebugIntegrity(section) {
   }
   if (getFieldValue(section, "debugging_integrity")) return section;
   return insertFieldBeforeLifecycle(section, "debugging_integrity", DEBUG_INTEGRITY);
+}
+
+function normalizeDocumentCodingConduct(text) {
+  if (validateCodingConductFields(text).valid) return text;
+  const block = renderCodingConductFields();
+  if (text.includes(DEBUG_INTEGRITY)) {
+    return insertAfterLineMatching(text, new RegExp(`^- ${escapeRegExp(DEBUG_INTEGRITY)}$`, "m"), block, block);
+  }
+  return `${text.trimEnd()}\n${block}\n`;
+}
+
+function normalizeTaskCodingConduct(text) {
+  if (validateCodingConductFields(getCodingConductFieldSection(text)).valid) return text;
+  const block = `## ${CODING_CONDUCT_GATE_NAME}\n\n${renderCodingConductFields()}`;
+  if (/^## Completion Conditions$/m.test(text)) {
+    return text.replace(/^## Completion Conditions$/m, `${block}\n\n## Completion Conditions`);
+  }
+  return `${text.trimEnd()}\n\n${block}\n`;
+}
+
+function normalizeAuditCodingConduct(text) {
+  const block = `- Record ${CODING_CONDUCT_GATE_NAME} checks, including OSS reuse decision, first-principles bug analysis when applicable, and no hidden fallback implementation.`;
+  if (text.includes(CODING_CONDUCT_GATE_NAME) && /first-principles bug analysis/i.test(text)) return text;
+  return insertAfterLineMatching(text, /^- Record any retire\/cancel action.*$/m, block, block);
+}
+
+function normalizeAssignmentsCodingConduct(text) {
+  let next = text;
+  if (!validateCodingConductFields(getCodingConductFieldSection(next)).valid) {
+    next = insertAfterRoleScaffoldHeading(next, `## ${CODING_CONDUCT_GATE_NAME}\n\n${renderCodingConductFields()}`);
+  }
+  for (const role of ROLES) {
+    const section = getRoleSection(next, role);
+    if (!section || validateCodingConductFields(section).valid) continue;
+    next = next.replace(section, ensureCodingConductFieldsInSection(section));
+  }
+  return next;
+}
+
+function normalizeHandoffCodingConduct(text) {
+  if (validateCodingConductFields(getCodingConductFieldSection(text)).valid) return text;
+  const block = `${CODING_CONDUCT_GATE_NAME}:\n${renderCodingConductFields()}`;
+  if (/^Meta-Cognitive Debug\/Repair Gate:$/m.test(text)) {
+    return text.replace(/^Meta-Cognitive Debug\/Repair Gate:$/m, `${block}\n\n${METACOGNITIVE_GATE_NAME}:`);
+  }
+  if (/^Subagent lifecycle:$/m.test(text)) {
+    return text.replace(/^Subagent lifecycle:$/m, `${block}\n\nSubagent lifecycle:`);
+  }
+  return `${text.trimEnd()}\n\n${block}\n`;
+}
+
+function normalizeRunnerPreambleCodingConduct(text) {
+  const packets = getModernRunnerPacketSections(text);
+  const preambleEnd = packets.length ? text.indexOf(packets[0]) : text.length;
+  const preamble = text.slice(0, preambleEnd);
+  if (validateCodingConductFields(preamble).valid) return text;
+  const normalizedPreamble = ensureCodingConductFieldsInSection(preamble);
+  return normalizedPreamble + text.slice(preambleEnd);
+}
+
+function normalizeRunnerPacketCodingConduct(section) {
+  const type = getFieldValue(section, "type");
+  if (!["assignment", "parent-integration", "process-orchestration-skeleton", "process-runner-result"].includes(type)) {
+    return section;
+  }
+  if (runnerPacketUsesLegacySchema(section) && !hasAnyCodingConductField(section)) return section;
+  if (validateCodingConductFields(section).valid) return section;
+  return ensureCodingConductFieldsInSection(section);
 }
 
 function normalizeReadmeSupervision(text) {
@@ -1152,12 +1256,26 @@ function ensureSupervisionFieldsInSection(section) {
   return next;
 }
 
+function ensureCodingConductFieldsInSection(section) {
+  let next = section;
+  for (const line of renderCodingConductFields().split("\n").filter(Boolean)) {
+    const match = /^- ([^:]+):\s*(.*)$/.exec(line);
+    if (!match) continue;
+    next = upsertFieldBeforeLifecycle(next, match[1], match[2], { replaceIfEmptyOrNone: true });
+  }
+  return next;
+}
+
+function hasAnyCodingConductField(section) {
+  return Boolean(getFieldValue(section, "coding_conduct_gate") || getFieldValue(section, "coding_conduct_rules"));
+}
+
 function replaceSupervisionPromptSection(text, block) {
   const match = /^Supervision:$/m.exec(text);
   if (!match) return `${text.trimEnd()}\n\n${block}\n`;
   const before = text.slice(0, match.index).trimEnd();
   const after = text.slice(match.index + match[0].length);
-  const nextSectionOffset = after.search(/^(?:Debugging integrity:|Subagent lifecycle:|Meta-Cognitive Debug\/Repair Gate:)/m);
+  const nextSectionOffset = after.search(/^(?:Debugging integrity:|Coding Conduct Gate:|Subagent lifecycle:|Meta-Cognitive Debug\/Repair Gate:)/m);
   if (nextSectionOffset === -1) return `${before}\n\n${block}\n`;
   return `${before}\n\n${block}\n\n${after.slice(nextSectionOffset).trimStart()}`;
 }
@@ -1599,6 +1717,7 @@ function renderAssignmentPacket(packet) {
 ${renderFeatureProfilePacketGuidance(packet)}
 - nested_coding_agents_preflight: ${NESTED_CODING_AGENTS_PREFLIGHT}
 - debugging_integrity: ${DEBUG_INTEGRITY}
+${renderCodingConductFields()}
 ${renderSupervisionFields(packet)}
 ${renderMetacognitiveGatePacketSchema(packet.metacognitiveGate)}
 - lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
@@ -1624,6 +1743,7 @@ function renderIntegrationPacket(packet) {
 - assumptions: ${packet.assumptions}
 - next: ${packet.next}
 - debugging_integrity: ${DEBUG_INTEGRITY}
+${renderCodingConductFields()}
 ${renderSupervisionFields(packet)}
 ${renderMetacognitiveGatePacketSchema(packet.metacognitiveGate)}
 ${renderMetacognitiveResultFields(packet.metacognitiveGate, "not completed", packet.metacognitiveFields, {
@@ -1652,6 +1772,7 @@ function renderOrchestrationSkeleton(packet) {
 ${renderFeatureProfilePacketGuidance(packet)}
 - nested_coding_agents_preflight: ${NESTED_CODING_AGENTS_PREFLIGHT}
 - debugging_integrity: ${DEBUG_INTEGRITY}
+${renderCodingConductFields()}
 ${renderSupervisionFields(packet)}
 ${renderMetacognitiveGatePacketSchema(packet.metacognitiveGate)}
 - lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
@@ -1680,6 +1801,7 @@ function renderRunnerResult(result) {
 - summary: ${result.summary || "none"}
 - failure: ${result.failure}
 - debugging_integrity: ${DEBUG_INTEGRITY}
+${renderCodingConductFields()}
 ${renderSupervisionFields(result)}
 ${renderMetacognitiveGatePacketSchema(result.metacognitiveGate)}
 ${renderMetacognitiveResultFields(result.metacognitiveGate, "missing from runner result", result.metacognitiveFields, {
@@ -1700,6 +1822,7 @@ Subagents are closed or retired after integration, timeout/failure/blocker handl
 ${NESTED_CODING_AGENTS_PREFLIGHT}
 ${renderSupervisionFields()}
 ${DEBUG_INTEGRITY}
+${renderCodingConductFields()}
 ${METACOGNITIVE_GATE_CONTRACT}
 `;
   const current = existsSync(runnerPath) ? readFileSync(runnerPath, "utf8") : initial;
@@ -1773,6 +1896,7 @@ function validateRoleAssignments(text, workflowGate = { required: false }) {
   const missingRoles = ROLES.filter((role) => !new RegExp(`^## ${escapeRegExp(role)}$`, "m").test(text));
   const invalidFields = [];
   const invalidSupervisionFields = [];
+  const invalidCodingConductFields = [];
   const invalidMetacognitiveFields = [];
 
   for (const role of ROLES) {
@@ -1787,6 +1911,8 @@ function validateRoleAssignments(text, workflowGate = { required: false }) {
     }
     const supervision = validateSupervisionContractFields(section);
     for (const missing of supervision.missing) invalidSupervisionFields.push(`${role}.${missing}`);
+    const conduct = validateCodingConductFields(section);
+    for (const missing of conduct.missing) invalidCodingConductFields.push(`${role}.${missing}`);
     if (workflowGate.required) {
       const roleGate = validateMetacognitiveGateText(section);
       for (const missing of roleGate.missing) invalidMetacognitiveFields.push(`${role}.${missing}`);
@@ -1808,6 +1934,15 @@ function validateRoleAssignments(text, workflowGate = { required: false }) {
   if (invalidSupervisionFields.length === 0) results.push(["ok", "supervision contract present in assignments"]);
   else {
     results.push(["warn", `missing or incomplete supervision assignment fields: ${invalidSupervisionFields.join(", ")}`]);
+    fatal = true;
+  }
+
+  const assignmentConduct = validateCodingConductFields(getCodingConductFieldSection(text));
+  if (assignmentConduct.valid && invalidCodingConductFields.length === 0) {
+    results.push(["ok", "coding conduct gate present in assignments"]);
+  } else {
+    const missing = [...assignmentConduct.missing.map((field) => `assignments.${field}`), ...invalidCodingConductFields];
+    results.push(["warn", `missing or incomplete coding conduct assignment fields: ${missing.join(", ")}`]);
     fatal = true;
   }
 
@@ -1840,6 +1975,7 @@ function validateRunnerPackets(text, workflowGate = { required: false }) {
   const parentIntegrationSections = sections.filter((section) => getFieldValue(section, "type") === "parent-integration");
   const invalidPackets = [];
   const invalidSupervisionPackets = [];
+  const invalidCodingConductPackets = [];
   const invalidMetacognitivePackets = [];
   const uncollectedCompletedRunnerPackets = [];
   let checked = 0;
@@ -1900,6 +2036,11 @@ function validateRunnerPackets(text, workflowGate = { required: false }) {
       for (const missing of supervision.missing) invalidSupervisionPackets.push(`${packetLabel(section)}.${missing}`);
     }
 
+    if (!runnerPacketUsesLegacySchema(section) || hasAnyCodingConductField(section)) {
+      const conduct = validateCodingConductFields(section);
+      for (const missing of conduct.missing) invalidCodingConductPackets.push(`${packetLabel(section)}.${missing}`);
+    }
+
     const packetGate = runnerPacketMetacognitiveRequired(section, workflowGate);
     if (packetGate.required) {
       const gateValidation = validateMetacognitiveGateText(section);
@@ -1922,6 +2063,7 @@ function validateRunnerPackets(text, workflowGate = { required: false }) {
   if (
     invalidPackets.length === 0
     && invalidSupervisionPackets.length === 0
+    && invalidCodingConductPackets.length === 0
     && invalidMetacognitivePackets.length === 0
     && uncollectedCompletedRunnerPackets.length === 0
   ) {
@@ -1931,6 +2073,9 @@ function validateRunnerPackets(text, workflowGate = { required: false }) {
   if (invalidPackets.length) results.push(["warn", `missing or empty runner packet fields: ${invalidPackets.join(", ")}`]);
   if (invalidSupervisionPackets.length) {
     results.push(["warn", `missing or incomplete supervision runner packet fields: ${invalidSupervisionPackets.join(", ")}`]);
+  }
+  if (invalidCodingConductPackets.length) {
+    results.push(["warn", `missing or incomplete coding conduct runner packet fields: ${invalidCodingConductPackets.join(", ")}`]);
   }
   if (invalidMetacognitivePackets.length) {
     results.push(["warn", `missing or incomplete metacognitive runner packet fields: ${invalidMetacognitivePackets.join(", ")}`]);
@@ -2237,6 +2382,29 @@ function validateSupervisionContractFields(section) {
   return { valid: missing.length === 0, missing };
 }
 
+function validateCodingConductFields(section) {
+  const missing = [];
+  const gate = getFieldValue(section, "coding_conduct_gate");
+  if (gate !== CODING_CONDUCT_GATE_NAME) missing.push("coding_conduct_gate");
+
+  const rules = getFieldValue(section, "coding_conduct_rules");
+  if (!rules) {
+    missing.push("coding_conduct_rules");
+  } else {
+    if (!/GitHub\/npm OSS/i.test(rules) || !/do not reimplement/i.test(rules)) {
+      missing.push("coding_conduct_rules.oss_reuse");
+    }
+    if (!/first principles/i.test(rules) || !/expected outcome/i.test(rules) || !/competing hypotheses/i.test(rules)) {
+      missing.push("coding_conduct_rules.first_principles");
+    }
+    if (!/fallback implementations/i.test(rules) || !/main-flow errors/i.test(rules) || !/unresolved/i.test(rules)) {
+      missing.push("coding_conduct_rules.no_fallback");
+    }
+  }
+
+  return { valid: missing.length === 0, missing };
+}
+
 function validateHierarchyFields(section) {
   const missing = new Set();
   const mode = getFieldValue(section, "hierarchy_mode");
@@ -2498,6 +2666,11 @@ function renderMetacognitiveGateState(gate) {
 - metacognitive_gate_triggers: ${formatTriggers(normalized)}
 - metacognitive_gate_fields: ${METACOGNITIVE_GATE_FIELDS.join(", ")}
 - metacognitive_gate_contract: ${METACOGNITIVE_GATE_CONTRACT}`;
+}
+
+function renderCodingConductFields() {
+  return `- coding_conduct_gate: ${CODING_CONDUCT_GATE_NAME}
+- coding_conduct_rules: ${CODING_CONDUCT_RULES.join(" | ")}`;
 }
 
 function renderSupervisionSection() {
@@ -2982,7 +3155,7 @@ Commands:
   run/orchestrate
            Record an assignment and orchestration skeleton by default; with --runner codex-cli, spawn codex exec and record normalized results.
   verify-assignments
-           Block missing or empty task_id, epoch, scope, lifecycle, supervision, or debugging_integrity fields in assignments and modern runner packets.
+           Block missing or empty task_id, epoch, scope, lifecycle, supervision, coding conduct, or debugging_integrity fields in assignments and modern runner packets.
   normalize-debugging-integrity
            Dry-run by default. With --execute, add debugging integrity and metacognitive gate schema to existing .coding-agents files and supersede pre-gate completion claims that lack required result fields.
   handoff  Print target .coding-agents/handoff.md.
@@ -2996,7 +3169,7 @@ State:
   With --target-cwd, --cwd records the invocation cwd (or process cwd when omitted) while state and runner execution use --target-cwd.
   Existing docs/codex directories are migration input or hints only; they are never operational state fallback or write targets.
   State writes add .coding-agents/ to .git/info/exclude; .gitignore is not edited.
-  Generated assignments, handoff prompts, and runner packets carry lifecycle closure, supervision, and debugging integrity rules.
+  Generated assignments, handoff prompts, and runner packets carry lifecycle closure, supervision, coding conduct, and debugging integrity rules.
   Parent-managed child-worker prompts also suppress nested Coding Agents preflight; child workers do not ask \`coding-agents を使いますか？ [Y/n]\` or start independent nested Coding Agents workflows inside an assigned task_id/epoch/scope. Descendant delegation is allowed only when finite hierarchy fields grant remaining_depth > 0 and inherited supervision is preserved.
   Supervision treats silence before heartbeat deadline as neutral, forbids cancel/interrupt/retire/replace of quiet workers during the no-interrupt window, requires workers that are still running at heartbeat_interval to self-report completed/current/blocker/ETA progress, treats explicit completed/blocked/failed results as immediate collect/integrate triggers rather than silence, treats heartbeat as telemetry rather than completion evidence, requires explicit retire/cancel reasons (${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}), and uses missed heartbeat -> soft ping/status request -> grace wait -> stale mark before cancel/replace.
   Optional --feature-profile overlays provide scoped assignment guidance only. Known ids: ${knownFeatureProfileIds().join(", ")}.
@@ -3008,6 +3181,7 @@ State:
   Runner machine scope grammar is "scope:v1 all" for the whole repo, or "scope:v1 paths=README.md,bin/coding-agents.mjs,tests/" for comma-separated repo-relative prefixes.
   Absolute paths in "scope:v1 paths=" are accepted only when they resolve inside the target cwd and are normalized to repo-relative prefixes.
   Legacy runner scopes remain available only for simple path-only values such as "README.md", "allowed/", "bin/coding-agents.mjs tests/workflow-state.test.mjs", ".", "repo", and "whole repo".
+  ${CODING_CONDUCT_GATE_NAME}: ${CODING_CONDUCT_CONTRACT}
   Debug or repair work must identify root cause and verify the intended outcome; log-only, fallback-only, skip-only, failure-output-only, or return-to-main-loop-only changes are not completion.
   Gate-required source-change/debug/repair/source-of-truth/plugin-contract/generated-artifact inconsistency work also carries ${METACOGNITIVE_GATE_NAME} fields and rejects completed collection without them.
 `);
@@ -3088,6 +3262,19 @@ function getMetacognitiveGateFieldSection(text) {
   const nextHeading = findMarkdownLineOutsideFences(
     content,
     (line) => /^#{1,6}\s+/.test(line),
+    heading.end,
+  );
+  return content.slice(heading.start, nextHeading ? nextHeading.start : content.length);
+}
+
+function getCodingConductFieldSection(text) {
+  const content = String(text || "");
+  const headingPattern = new RegExp(`^(?:#{1,6}\\s+)?${escapeRegExp(CODING_CONDUCT_GATE_NAME)}:?\\s*$`);
+  const heading = findMarkdownLineOutsideFences(content, (line) => headingPattern.test(line));
+  if (!heading) return content;
+  const nextHeading = findMarkdownLineOutsideFences(
+    content,
+    (line) => /^#{1,6}\s+/.test(line) || /^(?:Debugging integrity|Subagent lifecycle|Meta-Cognitive Debug\/Repair Gate):$/.test(line),
     heading.end,
   );
   return content.slice(heading.start, nextHeading ? nextHeading.start : content.length);

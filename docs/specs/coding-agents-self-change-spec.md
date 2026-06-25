@@ -6,7 +6,7 @@ behavior. It is not workflow state and must not be treated as a generated
 
 ## Confirmed Boundary
 
-Items 1-8 are Coding Agents self changes. Item 9 is external legacy cleanup.
+Items 1-9 are Coding Agents self changes. Item 10 is external legacy cleanup.
 
 1. State directory
    - Coding Agents runtime/workflow state belongs under `<git-root>/.coding-agents/`.
@@ -85,9 +85,16 @@ Items 1-8 are Coding Agents self changes. Item 9 is external legacy cleanup.
 6. Debugging integrity
    - Debug or repair work is complete only when the root cause is identified,
      fixed, and verified against the intended outcome.
+   - Bug analysis must start from first principles: expected outcome, actual
+     behavior, invariants, inputs, execution path, evidence, and competing
+     hypotheses before selecting a fix.
    - Log-only, error-message-only, exception-catch-only, skip-only,
      fallback-only, failure-output-only, and return-to-main-loop-only changes are
      temporary containment at most and must not be accepted as debug completion.
+   - Fallback implementations that hide main-flow errors are prohibited as a
+     repair route. A user-explicit temporary containment may be recorded only as
+     containment, with unresolved root cause, failing main flow, residual risk,
+     and removal condition visible.
    - Generated assignments, runner prompts, runner packets, audit material, and
      handoff material must carry this debugging integrity rule so delegated work
      preserves it.
@@ -112,13 +119,39 @@ Items 1-8 are Coding Agents self changes. Item 9 is external legacy cleanup.
      claiming completion for gate-required work.
    - Passive checklists, prose-only `debugging_integrity`, log-only completion,
      fallback-only completion, skip-only completion, failure-output-only
-     completion, and local-wrapper fixes without premise reconsideration are
+     completion, hidden-fallback completion, avoidable reimplementation of
+     mature OSS, and local-wrapper fixes without premise reconsideration are
      non-completion for gate-required work.
    - If neighboring feature or before/after context checks cannot be completed
      inside the active scope, the skipped checks, reason, remaining risk, and
      next investigation must be recorded instead of treating the gate as passed.
 
-8. Nested Coding Agents preflight suppression
+8. Coding Conduct Gate
+   - Coding and debug work must carry a machine-visible Coding Conduct Gate in
+     generated assignments, runner prompts, runner packets, handoff material,
+     and validation for modern workflow state.
+   - If a mature open-source solution exists on GitHub or npm and fits the
+     requirement, Coding Agents must reuse it directly instead of
+     reimplementing the solved problem.
+   - Dependency installation or package adoption still requires that dependency
+     addition is inside the active scope, permitted by repository policy, and
+     approved when approval is required.
+   - When no mature GitHub/npm solution is reused, the worker must record the
+     non-reuse reason: scope restriction, policy restriction, mismatch with
+     requirements, security/licensing concern, dependency approval not granted,
+     or no mature solution found.
+   - Bug analysis must begin from first principles before patching: intended
+     contract, expected outcome, actual behavior, invariants, inputs, execution
+     path, observations, and competing hypotheses.
+   - Fallback implementations are prohibited when they hide errors in the main
+     flow, preserve a faulty premise, or allow completion to be claimed without
+     fixing the intended path. The correct result is to fix the main flow or
+     report unresolved status with the next investigation.
+   - User-explicit temporary containment remains allowed only as containment,
+     not completion, and must leave the failing main flow and removal condition
+     visible.
+
+9. Nested Coding Agents preflight suppression
    - Parent-managed child workers operate under a Coding Agents assignment that
      the parent already selected.
    - Generated assignments, runner prompts, runner packets, and handoff material
@@ -135,7 +168,7 @@ Items 1-8 are Coding Agents self changes. Item 9 is external legacy cleanup.
      contract. They cannot broaden scope, depth, permissions, or cancellation
      authority.
 
-9. Legacy migration and cleanup
+10. Legacy migration and cleanup
    - Existing legacy locations are cleaned through an explicit migration workflow,
      not by silent deletion or broad automatic rewriting.
    - The migration workflow must perform a preflight backup before destructive or
@@ -164,9 +197,9 @@ Future implementation work should preserve this split:
   when `--target-cwd` or an explicit target points elsewhere.
 - Generated job state must preserve nested Coding Agents preflight suppression,
   finite delegation depth, subagent supervision and cancellation rules,
-  subagent lifecycle closure, concise integration-output rules, debug
-  root-cause completion requirements, and metacognitive context-impact checks
-  for gate-required work.
+  subagent lifecycle closure, concise integration-output rules, the Coding
+  Conduct Gate, debug root-cause completion requirements, and metacognitive
+  context-impact checks for gate-required work.
 - Stale generated state must be normalized explicitly before verification is
   treated as current.
 - Legacy cleanup work may inspect external target repositories but must remain
