@@ -1,6 +1,7 @@
 ---
 name: coding-agents
-description: Use when the user wants the Coding Agents workflow or source CLI to intake a jobsite/target cwd, maintain the target git root's <git-root>/.coding-agents/ workflow state even when invoked cross-repo, assign/collect/run scoped specialist work with task_id/epoch/scope/lifecycle isolation, finite delegation depth, subagent supervision, feature-profile overlays, and --work-type metadata, enforce prompt subagent close/retire handling, enforce the Coding Conduct Gate, debugging root-cause integrity, and the metacognitive source-change/debug/repair gate for source-change, debug, repair, source-of-truth, plugin-contract, generated-artifact inconsistency, before/after context, or cross-feature consequences work, print a handoff prompt, audit workflow state, or migrate legacy docs/codex material. Trigger for explicit requests to initialize, plan, execute, coordinate, or audit coding work with coding-agents. Do not use for generic coding edits, and do not treat docs/codex as current workflow state.
+description: >-
+  coding-agents workflow/source CLI: use for explicit Coding Agents intake, jobsite .coding-agents state, task_id/epoch/scope assignments, finite delegation, subagent supervision, handoff/audit, Coding Conduct and source-change/debug root-cause gates. Do not use for generic edits or docs/codex alone.
 ---
 
 # Coding Agents
