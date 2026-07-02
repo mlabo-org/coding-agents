@@ -1,7 +1,7 @@
 {
   "name": "coding-agents",
   "version": "0.1.0",
-  "description": "対象 jobsite の Git root に .coding-agents 状態を置き、固定ロール scaffold、有限階層の supervised scoped assignment packet、intake / planning / audit、Coding Conduct Gate、source-change gate、DEBUG 根本原因ゲート、metacognitive source-change/debug/repair gate を支援する。",
+  "description": "Coding Agents workflow/source CLI for jobsite .coding-agents state, scoped assignments, finite delegation, intake, planning, audit, Coding Conduct, source-change, DEBUG, and repair coordination.",
   "skills": "./skills/",
   "keywords": [
     "coding-agents",
@@ -12,12 +12,12 @@
     "audit",
     "coding-conduct",
     "metacognitive-debug",
-    "source-change-gate"
+    "source-change"
   ],
   "interface": {
     "displayName": "Coding Agents",
-    "shortDescription": "Target-repo intake, fixed role scaffold, supervised scoped assignment packets, finite delegation depth, coding conduct, source-change gates, debug gates, and context-impact checks.",
-    "longDescription": "Resolves the jobsite or explicit --target-cwd repository, stores .coding-agents state under that target git root, and records a fixed role scaffold plus optional supervised scoped assignment packets for parent-managed specialist work. It supports finite delegation depth, heartbeat-based long-running worker supervision, stale-safe cancellation rules, intake, planning, audit, the Coding Conduct Gate for mature GitHub/npm OSS reuse, first-principles bug analysis, and no hidden fallback implementations, source-change metacognitive gating, debug root-cause integrity, and metacognitive context-impact checks without implying resident agents are active.",
+    "shortDescription": "Target-repo intake, fixed role scaffold, supervised scoped assignment packets, finite delegation, Coding Conduct, source-change, DEBUG, repair, audit, and context-impact checks.",
+    "longDescription": "Local source workflow for resolving a jobsite or explicit target repository, recording .coding-agents state, and preparing parent-managed scoped assignment packets. Covers finite delegation, worker supervision evidence, intake, planning, audit, Coding Conduct, source-change, DEBUG/root-cause, repair, and context-impact review without implying resident agents are active.",
     "developerName": "suzukimakoto",
     "category": "Productivity",
     "capabilities": [
@@ -29,7 +29,7 @@
     "defaultPrompt": [
       "Run Coding Agents intake for this target repo.",
       "Create supervised Coding Agents scoped assignment packets for this active task.",
-      "Audit the completed coding-agent work, including Coding Conduct Gate evidence."
+      "Audit completed Coding Agents work and summarize evidence."
     ],
     "brandColor": "#2563EB"
   },
