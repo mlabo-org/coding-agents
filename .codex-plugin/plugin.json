@@ -1,7 +1,7 @@
 {
   "name": "coding-agents",
   "version": "0.1.0",
-  "description": "Coding Agents workflow/source CLI for jobsite .coding-agents state, scoped assignments, finite delegation, intake, planning, audit, Coding Conduct, source-change, DEBUG, and repair coordination.",
+  "description": "Coding Agents workflow/source CLI for explicit intake, jobsite .coding-agents state, scoped assignments, finite delegation, supervision, handoff/audit, Coding Conduct, source-change and DEBUG gates. Primary route: use coding-agents workflow. Fallback: generic edits or docs/codex stay out unless explicitly scoped.",
   "skills": "./skills/",
   "keywords": [
     "coding-agents",
