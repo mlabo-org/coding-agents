@@ -1,7 +1,7 @@
 {
   "name": "coding-agents",
   "version": "0.1.0",
-  "description": "Coding Agents workflow/source CLI for explicit intake, jobsite .coding-agents state, scoped assignments, finite delegation, supervision, handoff/audit, Coding Conduct, source-change and DEBUG gates. Primary route: use coding-agents workflow. Fallback: generic edits or docs/codex stay out unless explicitly scoped.",
+  "description": "Coding Agents workflow/source CLI for explicit intake, jobsite .coding-agents state, scoped assignments, finite delegation, supervision, handoff/audit, Coding Conduct, Contract Coverage decision/completion evidence, source-change and DEBUG gates. Primary route: use coding-agents workflow. Fallback: generic edits or docs/codex stay out unless explicitly scoped.",
   "skills": "./skills/",
   "keywords": [
     "coding-agents",
@@ -11,13 +11,17 @@
     "delegation-depth",
     "audit",
     "coding-conduct",
+    "contract-coverage",
+    "decision-coverage",
+    "completion-conditions",
+    "source-spec-coverage",
     "metacognitive-debug",
     "source-change"
   ],
   "interface": {
     "displayName": "Coding Agents",
-    "shortDescription": "Target-repo intake, fixed role scaffold, supervised scoped assignment packets, finite delegation, Coding Conduct, source-change, DEBUG, repair, audit, and context-impact checks.",
-    "longDescription": "Local source workflow for resolving a jobsite or explicit target repository, recording .coding-agents state, and preparing parent-managed scoped assignment packets. Covers finite delegation, worker supervision evidence, intake, planning, audit, Coding Conduct, source-change, DEBUG/root-cause, repair, and context-impact review without implying resident agents are active.",
+    "shortDescription": "Target-repo intake, fixed role scaffold, supervised scoped assignment packets, finite delegation, Contract Coverage, Coding Conduct, source-change, DEBUG, repair, audit, and context-impact checks.",
+    "longDescription": "Local source workflow for resolving a jobsite or explicit target repository, recording .coding-agents state, and preparing parent-managed scoped assignment packets. Covers finite delegation, worker supervision evidence, intake, planning, audit, Contract Coverage for accepted decisions and completion conditions, Coding Conduct, source-change, DEBUG/root-cause, repair, and context-impact review without implying resident agents are active.",
     "developerName": "suzukimakoto",
     "category": "Productivity",
     "capabilities": [
@@ -29,7 +33,7 @@
     "defaultPrompt": [
       "Run Coding Agents intake for this target repo.",
       "Create supervised Coding Agents scoped assignment packets for this active task.",
-      "Audit completed Coding Agents work and summarize evidence."
+      "Audit completed Coding Agents work and summarize Contract Coverage evidence."
     ],
     "brandColor": "#2563EB"
   },

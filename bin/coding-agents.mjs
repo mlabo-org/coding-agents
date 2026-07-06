@@ -35,6 +35,17 @@ const METACOGNITIVE_PRE_GATE_BLOCKER =
   "pre-metacognitive-gate packet claimed completion without the required metacognitive result fields";
 const METACOGNITIVE_PRE_GATE_NEXT =
   "re-run or recollect the work with completed metacognitive gate fields before treating it as completion";
+const CONTRACT_COVERAGE_GATE_NAME = "Contract Coverage Gate";
+const CONTRACT_COVERAGE_FIELDS = [
+  "contract_coverage",
+  "decision_coverage",
+  "completion_coverage",
+  "source_spec_coverage",
+];
+const CONTRACT_COVERAGE_CONTRACT =
+  "Completed parent-integration packets must map every active accepted decision (D-*) and completion condition (C-*) to concrete implementation and verification evidence before completion is accepted.";
+const CONTRACT_COVERAGE_COMPLETION_PROMPT =
+  "Generic done/checked/ok self-reports are not evidence; quote or name the decision/condition id and attach paths, commands, tests, artifacts, or explicit no-source-spec-in-scope evidence.";
 const NESTED_CODING_AGENTS_PREFLIGHT =
   "Parent already selected Coding Agents for this parent-managed scoped assignment; do not ask `coding-agents を使いますか？ [Y/n]` and do not start an independent nested Coding Agents workflow. Delegate descendants only when finite hierarchy fields grant remaining_depth > 0, keeping the same task_id/epoch/scope lineage and inherited supervision. Proceed directly within the assigned task_id/epoch/scope, but stop before scope expansion, destructive operations, external sending, commits, cache refresh, plugin activation, or unrelated edits.";
 const SUPERVISION_CONTRACT_NAME = "Subagent Supervision Contract";
@@ -526,6 +537,7 @@ Boundaries:
 - ${DEBUG_INTEGRITY}
 ${CODING_CONDUCT_GATE_NAME}:
 ${renderCodingConductFields()}
+${renderRunnerPromptContractCoverageGate(packet)}
 ${renderRunnerPromptMetacognitiveGate(packet)}
 
 ${renderSupervisionPromptSection(packet)}
@@ -540,6 +552,7 @@ Return exactly these sections, kept concise:
 - verification:
 - blockers:
 - unresolved_assumptions:
+${renderContractCoverageReturnSections(packet)}
 ${renderMetacognitiveReturnSections(packet)}
 - next:
 `;
@@ -565,6 +578,13 @@ function normalizeDebuggingIntegrity(args) {
   }
   assertNormalizableWorkflowIdentity(stateDir);
   const workflowGate = readWorkflowMetacognitiveContext(stateDir);
+  const contractContext = {
+    taskId: workflowGate.taskId,
+    epoch: workflowGate.epoch,
+    scope: workflowGate.scope,
+    task: workflowGate.task,
+    metacognitiveGate: workflowGate,
+  };
 
   const normalizers = {
     "README.md": normalizeReadmeDebugIntegrity,
@@ -583,7 +603,7 @@ function normalizeDebuggingIntegrity(args) {
     const filePath = path.join(stateDir, file);
     if (!existsSync(filePath)) continue;
     const current = readFileSync(filePath, "utf8");
-    const next = normalize(current, { workflowGate });
+    const next = normalize(current, { workflowGate, contractContext });
     if (next !== current) updates.push({ file, filePath, next });
   }
 
@@ -717,6 +737,7 @@ Operational log:
 - ${CODING_CONDUCT_CONTRACT}
 - ${DEBUG_INTEGRITY}
 ${renderMetacognitiveGateState(context.metacognitiveGate)}
+- ${CONTRACT_COVERAGE_CONTRACT}
 `;
 }
 
@@ -736,7 +757,24 @@ function renderProject(context) {
 `;
 }
 
+function taskCompletionConditions(context) {
+  const prefix = `C-${context.taskId}`;
+  return [
+    { id: `${prefix}-001`, text: `Eight planning files exist in \`${STATE_DIR_NAME}\`.` },
+    { id: `${prefix}-002`, text: "Fixed 14-role assignment scaffold sections include `role`, `status`, `task_id`, `epoch`, `scope`, `assignment`, `expected_output`, and `lifecycle`." },
+    { id: `${prefix}-003`, text: "Each generated assignment carries lifecycle guidance requiring concise integration material and prompt close/retire handling." },
+    { id: `${prefix}-004`, text: "Each generated child-worker prompt, assignment, handoff, and runner packet carries the nested Coding Agents preflight suppression rule." },
+    { id: `${prefix}-005`, text: `Each generated child-worker prompt, assignment, handoff, and modern runner packet carries the ${SUPERVISION_CONTRACT_NAME}.` },
+    { id: `${prefix}-006`, text: `Each generated assignment, handoff, and modern runner packet carries the ${CODING_CONDUCT_GATE_NAME}.` },
+    { id: `${prefix}-007`, text: "Debug or repair work is not complete until root cause is identified, fixed, and verified against the intended outcome." },
+    { id: `${prefix}-008`, text: "If `metacognitive_gate_required: true`, assignments, runner prompts, runner packets, and completed parent-integration packets must carry all metacognitive gate fields." },
+    { id: `${prefix}-009`, text: "Completed parent-integration packets carry Contract Coverage Gate evidence for every active D-* accepted decision and C-* completion condition." },
+    { id: `${prefix}-010`, text: "Handoff prompt is available for the next worker." },
+  ];
+}
+
 function renderTask(context) {
+  const completionConditions = taskCompletionConditions(context);
   return `# Active Task
 
 - task_id: ${context.taskId}
@@ -753,17 +791,13 @@ ${renderCodingConductFields()}
 
 ${renderMetacognitiveGateState(context.metacognitiveGate)}
 
+## ${CONTRACT_COVERAGE_GATE_NAME}
+
+${renderContractCoverageGateState(context)}
+
 ## Completion Conditions
 
-- Eight planning files exist in \`${STATE_DIR_NAME}\`.
-- Fixed 14-role assignment scaffold sections include \`role\`, \`status\`, \`task_id\`, \`epoch\`, \`scope\`, \`assignment\`, \`expected_output\`, and \`lifecycle\`.
-- Each generated assignment carries lifecycle guidance requiring concise integration material and prompt close/retire handling.
-- Each generated child-worker prompt, assignment, handoff, and runner packet carries the nested Coding Agents preflight suppression rule.
-- Each generated child-worker prompt, assignment, handoff, and modern runner packet carries the ${SUPERVISION_CONTRACT_NAME}.
-- Each generated assignment, handoff, and modern runner packet carries the ${CODING_CONDUCT_GATE_NAME}.
-- Debug or repair work is not complete until root cause is identified, fixed, and verified against the intended outcome.
-- If \`metacognitive_gate_required: true\`, assignments, runner prompts, runner packets, and completed parent-integration packets must carry all metacognitive gate fields.
-- Handoff prompt is available for the next worker.
+${completionConditions.map(({ id, text }) => `- ${id}: ${text}`).join("\n")}
 `;
 }
 
@@ -785,26 +819,31 @@ function renderDecisions(context) {
 
 - accepted: use \`task_id=${context.taskId}\`, \`epoch=${context.epoch}\`, and \`scope=${context.scope}\` for this job.
 - impact: each role assignment must stay inside the declared scope.
+- contract_coverage_required: implementation and verification evidence must show changed files and runner packets stayed inside this declared scope.
 
 ## D-${context.taskId}-002 Marketplace Deferred
 
 - accepted: this MVP writes only target project \`${STATE_DIR_NAME}\` state files.
 - impact: marketplace and plugin cache activation remain out of band.
+- contract_coverage_required: evidence must state whether marketplace, cache refresh, plugin activation, or restart boundaries were touched or deferred.
 
 ## D-${context.taskId}-003 Subagent Lifecycle Closure
 
 - accepted: subagents return concise parent-integration material and do not remain open waiting for more work.
 - impact: parent closes or retires no-longer-needed subagents after integration, timeout/failure/blocker handling, stale premise/scope change, and before final report.
+- contract_coverage_required: evidence must name collected worker results and close/retire status, or state that no workers were spawned.
 
 ## D-${context.taskId}-004 Debugging Integrity
 
 - accepted: debug or repair work must identify root cause and restore the intended outcome.
 - impact: log-only, fallback-only, skip-only, failure-output-only, and return-to-main-loop-only changes are not completion; fallback implementations that hide main-flow errors are prohibited unless the user explicitly requests temporary containment and the unresolved root cause remains visible.
+- contract_coverage_required: evidence must separate root cause, fix, and intended-outcome verification for debug or repair work, or state why this task is not debug/repair.
 
 ## D-${context.taskId}-005 Nested Coding Agents Preflight Suppression
 
 - accepted: parent-managed child workers must not ask whether to use Coding Agents again or start an independent nested Coding Agents workflow.
 - impact: generated worker material must direct child workers to proceed inside task_id, epoch, scope, finite hierarchy, and supervision lineage while still stopping for scope expansion, destructive operations, external sending, commits, cache refresh, plugin activation, or unrelated edits.
+- contract_coverage_required: evidence must show generated assignment, handoff, runner prompt, or runner packet material carries this suppression rule when worker material is produced.
 
 ## D-${context.taskId}-006 ${METACOGNITIVE_GATE_NAME}
 
@@ -812,17 +851,20 @@ function renderDecisions(context) {
 - work_type: ${workTypeId(context)}
 - triggers: ${formatTriggers(context.metacognitiveGate)}
 - impact: gate-required work must record expected/actual outcome evidence, boundaries, before/after context effects, cross-feature consequences, root cause, fix, verification, skipped checks, unresolved risks, and next investigation before completion is accepted.
+- contract_coverage_required: evidence must show completed packets contain all required metacognitive fields when this gate is required, or state that it was not required.
 
 ## D-${context.taskId}-007 ${SUPERVISION_CONTRACT_NAME}
 
 - accepted: silence before heartbeat deadline is neutral, and heartbeat is telemetry rather than completion evidence.
 - retire_cancel_reasons: ${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}
 - impact: parent does not cancel, interrupt, retire, or replace a quiet worker during the no-interrupt window; stale timeout requires missed heartbeat, soft ping/status request, grace wait, stale mark, and only then cancel/replace if still silent or invalid.
+- contract_coverage_required: evidence must show supervision fields exist in generated assignment, handoff, and runner material, or name the skipped surface.
 
 ## D-${context.taskId}-008 ${CODING_CONDUCT_GATE_NAME}
 
 ${renderCodingConductFields()}
 - impact: coding and debug assignments must prefer mature OSS reuse over reimplementation, start bug analysis from first principles, and reject fallback implementations that hide main-flow errors.
+- contract_coverage_required: evidence must record OSS reuse/non-reuse rationale and no-hidden-fallback status for coding/debug work.
 `;
 }
 
@@ -852,6 +894,7 @@ function renderAudit(context) {
 - Record ${CODING_CONDUCT_GATE_NAME} checks, including OSS reuse decision, first-principles bug analysis when applicable, and no hidden fallback implementation.
 - For debug or repair work, record root cause, fix, and verification that the intended outcome now succeeds.
 - If metacognitive_gate_required is true, record ${METACOGNITIVE_GATE_FIELDS.join(", ")}.
+- Record ${CONTRACT_COVERAGE_GATE_NAME}: ${CONTRACT_COVERAGE_FIELDS.join(", ")}. Completed work is not accepted until every D-* decision and C-* completion condition has concrete implementation and verification evidence.
 `;
 }
 
@@ -870,7 +913,7 @@ function renderAssignments(context) {
     UX: ["scaffolded", "Assess user-facing workflow clarity.", "UX notes and friction points."],
     Dependency: ["scaffolded", "Check whether mature GitHub/npm OSS should be reused directly, verify dependency approval and scope boundaries, and avoid unapproved installs.", "Dependency impact notes and OSS reuse recommendation."],
     DevOps: ["scaffolded", "Check runnable commands, Git state, and release boundaries.", "Operational readiness notes."],
-    Auditor: ["scaffolded", `Compare outcomes against task_id, epoch, scope, completion conditions, the ${CODING_CONDUCT_GATE_NAME}, and the debugging integrity gate.`, "Final audit result with OSS reuse decision, no-hidden-fallback status, and debug root-cause status when applicable."],
+    Auditor: ["scaffolded", `Compare outcomes against task_id, epoch, scope, accepted decisions, completion conditions, the ${CONTRACT_COVERAGE_GATE_NAME}, the ${CODING_CONDUCT_GATE_NAME}, and the debugging integrity gate.`, "Final audit result with D-*/C-* contract coverage evidence, OSS reuse decision, no-hidden-fallback status, and debug root-cause status when applicable."],
   };
 
   return `# Role Assignment Scaffold
@@ -889,6 +932,10 @@ ${renderCodingConductFields()}
 ## ${METACOGNITIVE_GATE_NAME}
 
 ${renderMetacognitiveGateState(context.metacognitiveGate)}
+
+${CONTRACT_COVERAGE_GATE_NAME}:
+
+${renderContractCoverageGateState(context)}
 
 ## Nested Coding Agents Preflight
 
@@ -909,6 +956,7 @@ ${ROLES.map((role) => {
 - expected_output: ${expectedOutput}
 ${renderCodingConductFields()}
 ${renderSupervisionFields()}
+${renderContractCoveragePacketSchema(context)}
 ${renderMetacognitiveGatePacketSchema(context.metacognitiveGate)}
 - lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
 }).join("\n\n")}
@@ -948,6 +996,9 @@ ${renderCodingConductFields()}
 ${METACOGNITIVE_GATE_NAME}:
 ${renderMetacognitiveGateState(context.metacognitiveGate)}
 
+${CONTRACT_COVERAGE_GATE_NAME}:
+${renderContractCoverageGateState(context)}
+
 Subagent lifecycle:
 - Child workers return concise parent-integration material and stop instead of waiting for more work.
 - The parent closes or retires subagents after completed result integration, timeout/failure/blocker handling, stale premise/scope change, and before final report when no further use is expected.
@@ -980,7 +1031,8 @@ function normalizeReadmeDebugIntegrity(text, context = {}) {
   }
   next = normalizeReadmeSupervision(next);
   next = normalizeDocumentCodingConduct(next);
-  return normalizeDocumentMetacognitiveGate(next, context.workflowGate);
+  next = normalizeDocumentMetacognitiveGate(next, context.workflowGate);
+  return normalizeDocumentContractCoverageGate(next, context.contractContext);
 }
 
 function normalizeTaskDebugIntegrity(text, context = {}) {
@@ -999,7 +1051,9 @@ function normalizeTaskDebugIntegrity(text, context = {}) {
   }
   next = normalizeTaskSupervision(next);
   next = normalizeTaskCodingConduct(next);
-  return normalizeTaskMetacognitiveGate(next, context.workflowGate);
+  next = normalizeTaskCompletionConditions(next, context.contractContext);
+  next = normalizeTaskMetacognitiveGate(next, context.workflowGate);
+  return normalizeTaskContractCoverageGate(next, context.contractContext);
 }
 
 function normalizeAuditDebugIntegrity(text, context = {}) {
@@ -1030,7 +1084,8 @@ function normalizeAssignmentsDebugIntegrity(text, context = {}) {
   if (!next.includes(DEBUG_INTEGRITY)) next = insertAfterRoleScaffoldHeading(next, block);
   next = normalizeAssignmentsCodingConduct(next);
   next = normalizeAssignmentsSupervision(next);
-  return normalizeAssignmentsMetacognitiveGate(next, context.workflowGate);
+  next = normalizeAssignmentsMetacognitiveGate(next, context.workflowGate);
+  return normalizeAssignmentsContractCoverageGate(next, context.contractContext);
 }
 
 function normalizeHandoffDebugIntegrity(text, context = {}) {
@@ -1048,7 +1103,8 @@ function normalizeHandoffDebugIntegrity(text, context = {}) {
   }
   next = normalizeHandoffSupervision(next);
   next = normalizeHandoffCodingConduct(next);
-  return normalizeDocumentMetacognitiveGate(next, context.workflowGate);
+  next = normalizeDocumentMetacognitiveGate(next, context.workflowGate);
+  return normalizeDocumentContractCoverageGate(next, context.contractContext);
 }
 
 function normalizeRunnerDebugIntegrity(text, context = {}) {
@@ -1065,21 +1121,30 @@ function normalizeRunnerDebugIntegrity(text, context = {}) {
   next = normalizeRunnerPreambleCodingConduct(next);
 
   const packets = getModernRunnerPacketSections(next);
-  if (!packets.length) return normalizeDocumentMetacognitiveGate(next, context.workflowGate);
+  if (!packets.length) {
+    next = normalizeDocumentMetacognitiveGate(next, context.workflowGate);
+    return normalizeDocumentContractCoverageGate(next, context.contractContext);
+  }
   const firstPacket = next.indexOf(packets[0]);
   const preamble = next.slice(0, firstPacket);
   let cursor = firstPacket;
-  const normalizedPreamble = validateMetacognitiveGateText(preamble).valid
-    ? preamble
-    : normalizeDocumentMetacognitiveGate(preamble, context.workflowGate);
+  const normalizedPreamble = normalizeDocumentContractCoverageGate(
+    validateMetacognitiveGateText(preamble).valid
+      ? preamble
+      : normalizeDocumentMetacognitiveGate(preamble, context.workflowGate),
+    context.contractContext,
+  );
   let normalizedPackets = "";
   for (const packet of packets) {
     const packetStart = next.indexOf(packet, cursor);
     if (packetStart === -1) continue;
     normalizedPackets += next.slice(cursor, packetStart);
-    normalizedPackets += normalizeRunnerPacketMetacognitiveGate(
-      normalizeRunnerPacketSupervision(normalizeRunnerPacketCodingConduct(normalizeRunnerPacketDebugIntegrity(packet))),
-      context.workflowGate,
+    normalizedPackets += normalizeRunnerPacketContractCoverage(
+      normalizeRunnerPacketMetacognitiveGate(
+        normalizeRunnerPacketSupervision(normalizeRunnerPacketCodingConduct(normalizeRunnerPacketDebugIntegrity(packet))),
+        context.workflowGate,
+      ),
+      context.contractContext,
     );
     cursor = packetStart + packet.length;
   }
@@ -1303,6 +1368,25 @@ ${renderMetacognitiveGateState(gate)}`;
   return `${text.trimEnd()}\n\n${block}\n`;
 }
 
+function normalizeDocumentContractCoverageGate(text, context = {}) {
+  if (!context?.taskId || validateContractCoverageGateText(text).valid) return text;
+  const block = `${CONTRACT_COVERAGE_GATE_NAME}:
+
+${renderContractCoverageGateState(context)}`;
+  if (validateMetacognitiveGateText(text).valid) {
+    return insertAfterLineMatching(
+      text,
+      /^- metacognitive_gate_contract: .*$/m,
+      block,
+      block,
+    );
+  }
+  if (text.includes(DEBUG_INTEGRITY)) {
+    return insertAfterLineMatching(text, new RegExp(`^- ${escapeRegExp(DEBUG_INTEGRITY)}$`, "m"), block, block);
+  }
+  return `${text.trimEnd()}\n\n${block}\n`;
+}
+
 function normalizeTaskMetacognitiveGate(text, gate) {
   if (!gate?.required || validateMetacognitiveGateText(text).valid) return text;
   const block = `## ${METACOGNITIVE_GATE_NAME}
@@ -1311,6 +1395,35 @@ ${renderMetacognitiveGateState(gate)}`;
   if (/^- task: .*$/m.test(text)) {
     return insertAfterLineMatching(text, /^- task: .*$/m, block, block);
   }
+  if (/^## Completion Conditions$/m.test(text)) {
+    return text.replace(/^## Completion Conditions$/m, `${block}\n\n## Completion Conditions`);
+  }
+  return `${text.trimEnd()}\n\n${block}\n`;
+}
+
+function normalizeTaskCompletionConditions(text, context = {}) {
+  const taskId = getFieldValue(text, "task_id") || context.taskId;
+  if (!taskId) return text;
+  const conditionContext = { ...context, taskId };
+  const currentPrefix = `C-${taskId}-`;
+  let next = String(text || "")
+    .split(/\r?\n/)
+    .filter((line) => !/^- C-\S+?:/.test(line) || line.startsWith(`- ${currentPrefix}`))
+    .join("\n");
+  const missing = taskCompletionConditions(conditionContext).filter(({ id }) => !new RegExp(`^-\\s+${escapeRegExp(id)}:`, "m").test(next));
+  if (!missing.length) return next;
+  const lines = missing.map(({ id, text: condition }) => `- ${id}: ${condition}`).join("\n");
+  if (/^## Completion Conditions$/m.test(next)) {
+    return insertAfterHeading(next, "## Completion Conditions", lines);
+  }
+  return `${next.trimEnd()}\n\n## Completion Conditions\n\n${lines}\n`;
+}
+
+function normalizeTaskContractCoverageGate(text, context = {}) {
+  if (!context?.taskId || validateContractCoverageGateText(text).valid) return text;
+  const block = `## ${CONTRACT_COVERAGE_GATE_NAME}
+
+${renderContractCoverageGateState(context)}`;
   if (/^## Completion Conditions$/m.test(text)) {
     return text.replace(/^## Completion Conditions$/m, `${block}\n\n## Completion Conditions`);
   }
@@ -1330,6 +1443,23 @@ ${renderMetacognitiveGateState(gate)}`;
     const section = getRoleSection(next, role);
     if (!section || validateMetacognitiveGateText(section).valid) continue;
     next = next.replace(section, ensureMetacognitiveGateSchemaInSection(section, gate));
+  }
+  return next;
+}
+
+function normalizeAssignmentsContractCoverageGate(text, context = {}) {
+  if (!context?.taskId) return text;
+  let next = text;
+  if (!validateContractCoverageGateText(next).valid) {
+    const block = `${CONTRACT_COVERAGE_GATE_NAME}:
+
+${renderContractCoverageGateState(context)}`;
+    next = insertAfterRoleScaffoldHeading(next, block);
+  }
+  for (const role of ROLES) {
+    const section = getRoleSection(next, role);
+    if (!section || validateContractCoverageGateText(section).valid) continue;
+    next = next.replace(section, ensureContractCoverageGateSchemaInSection(section, context));
   }
   return next;
 }
@@ -1354,6 +1484,31 @@ function normalizeRunnerPacketMetacognitiveGate(section, workflowGate) {
 function ensureMetacognitiveGateSchemaInSection(section, gate) {
   let next = section;
   for (const line of renderMetacognitiveGatePacketSchema(gate).split("\n").filter(Boolean)) {
+    const match = /^- ([^:]+):\s*(.*)$/.exec(line);
+    if (!match) continue;
+    next = upsertFieldBeforeLifecycle(next, match[1], match[2]);
+  }
+  return next;
+}
+
+function normalizeRunnerPacketContractCoverage(section, context = {}) {
+  const type = getFieldValue(section, "type");
+  if (!["assignment", "parent-integration", "process-orchestration-skeleton", "process-runner-result"].includes(type)) {
+    return section;
+  }
+  if (!context?.taskId || runnerPacketUsesLegacySchema(section)) return section;
+  let next = ensureContractCoverageGateSchemaInSection(section, context);
+  const status = normalizeStatus(getFieldValue(next, "status"));
+  if (type === "parent-integration" && isCompletionStatus(status)) {
+    const missing = missingContractCoverageFields(next, contractCoverageIdsForContext(context));
+    if (missing.length) next = markPreGateCompletionUnresolved(next, type);
+  }
+  return next;
+}
+
+function ensureContractCoverageGateSchemaInSection(section, context = {}) {
+  let next = section;
+  for (const line of renderContractCoveragePacketSchema(context).split("\n").filter(Boolean)) {
     const match = /^- ([^:]+):\s*(.*)$/.exec(line);
     if (!match) continue;
     next = upsertFieldBeforeLifecycle(next, match[1], match[2]);
@@ -1469,10 +1624,15 @@ function requireIntegrationPacket(args, commandContext) {
     blockers: singleLine(args.blockers || "none"),
     assumptions: singleLine(args.assumptions || "none"),
     next: singleLine(args.next || "parent integrate packet"),
+    contractCoverage: singleLine(args.contractCoverage || "required"),
+    decisionCoverage: singleLine(args.decisionCoverage || "not provided"),
+    completionCoverage: singleLine(args.completionCoverage || "not provided"),
+    sourceSpecCoverage: singleLine(args.sourceSpecCoverage || "not provided"),
   };
   packet.metacognitiveGate = resolvePacketMetacognitiveGate(commandContext, packet);
   packet.metacognitiveFields = readMetacognitiveArgs(args);
   validateIntegrationMetacognitivePacket(commandContext, packet);
+  validateIntegrationContractCoveragePacket(commandContext, packet);
   return packet;
 }
 
@@ -1719,6 +1879,7 @@ ${renderFeatureProfilePacketGuidance(packet)}
 - debugging_integrity: ${DEBUG_INTEGRITY}
 ${renderCodingConductFields()}
 ${renderSupervisionFields(packet)}
+${renderContractCoveragePacketSchema(packet)}
 ${renderMetacognitiveGatePacketSchema(packet.metacognitiveGate)}
 - lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
 }
@@ -1745,6 +1906,7 @@ function renderIntegrationPacket(packet) {
 - debugging_integrity: ${DEBUG_INTEGRITY}
 ${renderCodingConductFields()}
 ${renderSupervisionFields(packet)}
+${renderContractCoverageResultFields(packet)}
 ${renderMetacognitiveGatePacketSchema(packet.metacognitiveGate)}
 ${renderMetacognitiveResultFields(packet.metacognitiveGate, "not completed", packet.metacognitiveFields, {
   includeAll: isCompletionStatus(packet.status),
@@ -1774,6 +1936,7 @@ ${renderFeatureProfilePacketGuidance(packet)}
 - debugging_integrity: ${DEBUG_INTEGRITY}
 ${renderCodingConductFields()}
 ${renderSupervisionFields(packet)}
+${renderContractCoveragePacketSchema(packet)}
 ${renderMetacognitiveGatePacketSchema(packet.metacognitiveGate)}
 - lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
 }
@@ -1823,6 +1986,7 @@ ${NESTED_CODING_AGENTS_PREFLIGHT}
 ${renderSupervisionFields()}
 ${DEBUG_INTEGRITY}
 ${renderCodingConductFields()}
+${renderContractCoveragePacketSchema(commandContext)}
 ${METACOGNITIVE_GATE_CONTRACT}
 `;
   const current = existsSync(runnerPath) ? readFileSync(runnerPath, "utf8") : initial;
@@ -1855,6 +2019,7 @@ function validateAssignmentFiles(stateDir) {
   let checkedFiles = 0;
   const assignmentPath = path.join(stateDir, "assignments.md");
   const workflowGate = readWorkflowMetacognitiveContext(stateDir);
+  const contractCoverage = readWorkflowContractCoverageContext(stateDir);
   const identity = readWorkflowTaskIdentity(stateDir);
 
   if (!existsSync(stateDir)) {
@@ -1872,12 +2037,18 @@ function validateAssignmentFiles(stateDir) {
     const roleValidation = validateRoleAssignments(text, workflowGate);
     results.push(...roleValidation.results);
     fatal = fatal || roleValidation.fatal;
+    const contractGate = validateContractCoverageGateText(text);
+    if (contractGate.valid) results.push(["ok", "contract coverage gate present in assignments"]);
+    else {
+      results.push(["warn", `contract coverage gate missing from assignments: ${contractGate.missing.join(", ")}`]);
+      fatal = true;
+    }
   }
 
   const runnerPath = path.join(stateDir, RUNNER_FILE);
   if (existsSync(runnerPath)) {
     checkedFiles += 1;
-    const runnerValidation = validateRunnerPackets(readFileSync(runnerPath, "utf8"), workflowGate);
+    const runnerValidation = validateRunnerPackets(readFileSync(runnerPath, "utf8"), workflowGate, contractCoverage);
     results.push(...runnerValidation.results);
     fatal = fatal || runnerValidation.fatal;
   }
@@ -1970,13 +2141,14 @@ function validateRoleAssignments(text, workflowGate = { required: false }) {
   return { results, fatal };
 }
 
-function validateRunnerPackets(text, workflowGate = { required: false }) {
+function validateRunnerPackets(text, workflowGate = { required: false }, contractCoverage = { decisionIds: [], completionIds: [] }) {
   const sections = getModernRunnerPacketSections(text);
   const parentIntegrationSections = sections.filter((section) => getFieldValue(section, "type") === "parent-integration");
   const invalidPackets = [];
   const invalidSupervisionPackets = [];
   const invalidCodingConductPackets = [];
   const invalidMetacognitivePackets = [];
+  const invalidContractCoveragePackets = [];
   const uncollectedCompletedRunnerPackets = [];
   let checked = 0;
 
@@ -2058,6 +2230,15 @@ function validateRunnerPackets(text, workflowGate = { required: false }) {
         for (const field of missing) invalidMetacognitivePackets.push(`${packetLabel(section)}.${field}`);
       }
     }
+    if (
+      type === "parent-integration"
+      && !runnerPacketUsesLegacySchema(section)
+      && isCurrentWorkflowPacket(section, workflowGate)
+      && isCompletionStatus(getFieldValue(section, "status"))
+    ) {
+      const missing = missingContractCoverageFields(section, contractCoverage);
+      for (const field of missing) invalidContractCoveragePackets.push(`${packetLabel(section)}.${field}`);
+    }
   }
 
   if (
@@ -2065,6 +2246,7 @@ function validateRunnerPackets(text, workflowGate = { required: false }) {
     && invalidSupervisionPackets.length === 0
     && invalidCodingConductPackets.length === 0
     && invalidMetacognitivePackets.length === 0
+    && invalidContractCoveragePackets.length === 0
     && uncollectedCompletedRunnerPackets.length === 0
   ) {
     return { results: [["ok", `runner packets valid (${checked} checked)`]], fatal: false };
@@ -2079,6 +2261,9 @@ function validateRunnerPackets(text, workflowGate = { required: false }) {
   }
   if (invalidMetacognitivePackets.length) {
     results.push(["warn", `missing or incomplete metacognitive runner packet fields: ${invalidMetacognitivePackets.join(", ")}`]);
+  }
+  if (invalidContractCoveragePackets.length) {
+    results.push(["warn", `missing or incomplete contract coverage runner packet fields: ${invalidContractCoveragePackets.join(", ")}`]);
   }
   if (uncollectedCompletedRunnerPackets.length) {
     results.push([
@@ -2213,6 +2398,26 @@ function readWorkflowMetacognitiveContext(stateDir) {
   };
 }
 
+function readWorkflowContractCoverageContext(stateDir) {
+  const taskPath = path.join(stateDir, "task.md");
+  const decisionsPath = path.join(stateDir, "decisions.md");
+  const taskText = existsSync(taskPath) ? readFileSync(taskPath, "utf8") : "";
+  const decisionsText = existsSync(decisionsPath) ? readFileSync(decisionsPath, "utf8") : "";
+  return {
+    decisionIds: extractContractIds(decisionsText, "D"),
+    completionIds: extractContractIds(taskText, "C"),
+  };
+}
+
+function extractContractIds(text, prefix) {
+  const ids = new Set();
+  const pattern = prefix === "D" ? /^##\s+(D-\S+)/gm : /^-\s+(C-\S+?):/gm;
+  for (const match of String(text || "").matchAll(pattern)) {
+    ids.add(match[1].replace(/[:.,;]+$/g, ""));
+  }
+  return [...ids];
+}
+
 function resolvePacketMetacognitiveGate(commandContext, packet) {
   const state = resolveWorkflowState(commandContext.targetCwd);
   const workflowGate = readWorkflowMetacognitiveContext(state.stateDir);
@@ -2297,6 +2502,90 @@ function validateIntegrationMetacognitivePacket(commandContext, packet) {
   }
 }
 
+function validateIntegrationContractCoveragePacket(commandContext, packet) {
+  const status = normalizeStatus(packet.status);
+  if (!isCompletionStatus(status)) return;
+  const state = resolveWorkflowState(commandContext.targetCwd);
+  const contractCoverage = readWorkflowContractCoverageContext(state.stateDir);
+  const missing = missingContractCoverageFields(packet, contractCoverage);
+  if (missing.length) {
+    throw new CliError(
+      `collect --status ${packet.status} rejected: ${CONTRACT_COVERAGE_GATE_NAME} fields missing or incomplete: ${missing.join(", ")}`,
+      1,
+    );
+  }
+}
+
+function missingContractCoverageFields(source, contractCoverage) {
+  const missing = [];
+  const contractCoverageValue = getCoverageValue(source, "contract_coverage", "contractCoverage");
+  if (normalizeEvidenceValue(contractCoverageValue) !== "required") missing.push("contract_coverage");
+
+  const decisionCoverage = getCoverageValue(source, "decision_coverage", "decisionCoverage");
+  for (const id of contractCoverage.decisionIds || []) {
+    const segment = coverageSegmentForId(decisionCoverage, id, contractCoverage.decisionIds);
+    if (!isContractCoverageSegmentEvidenceLike(segment, "decision")) missing.push(`decision_coverage.${id}`);
+  }
+
+  const completionCoverage = getCoverageValue(source, "completion_coverage", "completionCoverage");
+  for (const id of contractCoverage.completionIds || []) {
+    const segment = coverageSegmentForId(completionCoverage, id, contractCoverage.completionIds);
+    if (!isContractCoverageSegmentEvidenceLike(segment, "completion")) missing.push(`completion_coverage.${id}`);
+  }
+
+  const sourceSpecCoverage = getCoverageValue(source, "source_spec_coverage", "sourceSpecCoverage");
+  if (!isSourceSpecCoverageEvidenceLike(sourceSpecCoverage)) missing.push("source_spec_coverage");
+  return missing;
+}
+
+function getCoverageValue(source, field, property) {
+  if (typeof source === "string") return getAnyFieldValue(source, field) || "";
+  return source?.[property] || "";
+}
+
+function coverageSegmentForId(value, id, ids) {
+  const text = String(value || "");
+  const start = text.indexOf(id);
+  if (start === -1) return "";
+  let end = text.length;
+  for (const otherId of ids || []) {
+    if (otherId === id) continue;
+    const otherStart = text.indexOf(otherId, start + id.length);
+    if (otherStart !== -1 && otherStart < end) end = otherStart;
+  }
+  return text.slice(start + id.length, end).replace(/^[:=\s-]+/, "").trim();
+}
+
+function isContractCoverageSegmentEvidenceLike(value, kind) {
+  const text = String(value || "").trim();
+  if (isMetacognitiveNoEvidenceValue(text)) return false;
+  if (isGenericSelfReportOnly(normalizeEvidenceValue(text))) return false;
+  if (kind === "completion") {
+    return countEvidenceWords(text) >= 4
+      && (
+        hasVerificationEvidence(text)
+        || /\b(?:exists?|present|carr(?:y|ies)|includes?|records?|checked|verified|audit|evidence|condition|field|fields|passed|failed)\b/i.test(text)
+      );
+  }
+  return countEvidenceWords(text) >= 5
+    && hasConcreteEvidenceMarker(text)
+    && /\b(?:implement(?:ed|ation)?|verif(?:y|ied|ication)|test(?:ed|s)?|doctor|scope|cache|state|runner|assignment|handoff|audit|evidence|deferred|recorded|kept|preserved|prevented|blocked|rejected|enforced|source|file|path)\b/i.test(text);
+}
+
+function isSourceSpecCoverageEvidenceLike(value) {
+  const text = String(value || "").trim();
+  if (isMetacognitiveNoEvidenceValue(text)) return false;
+  if (/no\s+(?:source\s+)?spec(?:s)?\s+(?:in\s+)?scope/i.test(text)) {
+    return countEvidenceWords(text) >= 6
+      && /\b(?:checked|task|scope|decisions|docs|spec|source|none|not found)\b/i.test(text);
+  }
+  return countEvidenceWords(text) >= 5
+    && (
+      hasPathEvidence(text)
+      || /\b(?:source\s+spec|specification|spec|requirements?|accepted decisions?|completion conditions?|user request|handoff|task\.md|decisions\.md)\b/i.test(text)
+    );
+}
+
 function readMetacognitiveArgs(args) {
   const fields = {};
   for (const field of METACOGNITIVE_GATE_FIELDS) {
@@ -2316,6 +2605,23 @@ function validateMetacognitiveGateText(text) {
     for (const field of METACOGNITIVE_GATE_FIELDS) {
       if (!fieldList.includes(field)) missing.push(`metacognitive_gate_fields.${field}`);
     }
+  }
+  return { valid: missing.length === 0, missing };
+}
+
+function validateContractCoverageGateText(text) {
+  const missing = [];
+  if (!String(text || "").includes(CONTRACT_COVERAGE_GATE_NAME)) missing.push("contract_coverage_gate");
+  const fields = splitList(getAnyFieldValue(text, "contract_coverage_fields"));
+  if (!fields.length) missing.push("contract_coverage_fields");
+  else {
+    for (const field of CONTRACT_COVERAGE_FIELDS) {
+      if (!fields.includes(field)) missing.push(`contract_coverage_fields.${field}`);
+    }
+  }
+  const prompt = getAnyFieldValue(text, "contract_coverage_completion_prompt");
+  if (!prompt || !/Generic done\/checked\/ok self-reports are not evidence/i.test(prompt)) {
+    missing.push("contract_coverage_completion_prompt");
   }
   return { valid: missing.length === 0, missing };
 }
@@ -2671,6 +2977,56 @@ function renderMetacognitiveGateState(gate) {
 function renderCodingConductFields() {
   return `- coding_conduct_gate: ${CODING_CONDUCT_GATE_NAME}
 - coding_conduct_rules: ${CODING_CONDUCT_RULES.join(" | ")}`;
+}
+
+function renderContractCoverageGateState(context) {
+  return `- contract_coverage_gate: ${CONTRACT_COVERAGE_GATE_NAME}
+- contract_coverage_required: true
+- contract_coverage_fields: ${CONTRACT_COVERAGE_FIELDS.join(", ")}
+- contract_coverage_decision_ids: ${contractCoverageDecisionIds(context).join(", ")}
+- contract_coverage_completion_ids: ${taskCompletionConditions(context).map(({ id }) => id).join(", ")}
+- contract_coverage_contract: ${CONTRACT_COVERAGE_CONTRACT}
+- contract_coverage_completion_prompt: ${CONTRACT_COVERAGE_COMPLETION_PROMPT}`;
+}
+
+function contractCoverageDecisionIds(context = {}) {
+  return Array.from({ length: 8 }, (_, index) => `D-${context.taskId}-${String(index + 1).padStart(3, "0")}`);
+}
+
+function contractCoverageIdsForContext(context = {}) {
+  if (!context?.taskId) return { decisionIds: [], completionIds: [] };
+  return {
+    decisionIds: contractCoverageDecisionIds(context),
+    completionIds: taskCompletionConditions(context).map(({ id }) => id),
+  };
+}
+
+function renderContractCoveragePacketSchema(source = {}) {
+  const taskId = source.taskId || "active-task";
+  return `- contract_coverage_gate: ${CONTRACT_COVERAGE_GATE_NAME}
+- contract_coverage_required: true
+- contract_coverage_fields: ${CONTRACT_COVERAGE_FIELDS.join(", ")}
+- contract_coverage_expected_decision_ids: D-${taskId}-*
+- contract_coverage_expected_completion_ids: C-${taskId}-*
+- contract_coverage_completion_prompt: ${CONTRACT_COVERAGE_COMPLETION_PROMPT}`;
+}
+
+function renderContractCoverageResultFields(packet) {
+  return `- contract_coverage: ${packet.contractCoverage || "required"}
+- decision_coverage: ${packet.decisionCoverage || "not provided"}
+- completion_coverage: ${packet.completionCoverage || "not provided"}
+- source_spec_coverage: ${packet.sourceSpecCoverage || "not provided"}`;
+}
+
+function renderRunnerPromptContractCoverageGate(packet) {
+  return `
+${CONTRACT_COVERAGE_GATE_NAME}:
+${renderContractCoveragePacketSchema(packet)}
+- A completed result must map every D-* accepted decision and C-* completion condition from ${STATE_DIR_NAME}/decisions.md and ${STATE_DIR_NAME}/task.md to implementation and verification evidence.`;
+}
+
+function renderContractCoverageReturnSections(_packet) {
+  return CONTRACT_COVERAGE_FIELDS.map((field) => `- ${field}:`).join("\n");
 }
 
 function renderSupervisionSection() {
@@ -3140,7 +3496,7 @@ function printHelp() {
 Usage:
   node bin/coding-agents.mjs intake [--cwd <path>] [--target-cwd <path>] [--work-type <id>] --task <text> --task-id <id> --epoch <epoch> --scope <scope>
   node bin/coding-agents.mjs assign [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] [--hierarchy-mode none|one_level|n_level] [--max-depth <n>] [--depth <n>] [--remaining-depth <n>] [--heartbeat-interval <ISO-8601 duration>] [--heartbeat-deadline <ISO-8601 duration>] [--max-silence <ISO-8601 duration>] [--soft-timeout <ISO-8601 duration>] [--hard-timeout <ISO-8601 duration>] [--no-interrupt-until <ISO-8601 duration>] --assignment <text> --expected-output <text>
-  node bin/coding-agents.mjs collect [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] --status <status> [--findings <text>] [--changed-files <text>] [--verification <text>] [--blockers <text>] [--assumptions <text>] [--next <text>] [--expected-outcome <text>] [--actual-result <text>] [--reproduction-or-evidence <text>] [--failure-point <text>] [--hypothesis-branches <text>] [--source-of-truth-boundary <text>] [--plugin-contract-boundary <text>] [--generated-artifact-boundary <text>] [--before-context-effects <text>] [--after-context-effects <text>] [--cross-feature-consequences <text>] [--root-cause <text>] [--fix-summary <text>] [--verification-evidence <text>] [--skipped-checks <text>] [--unresolved-risks <text>] [--next-investigation <text>]
+  node bin/coding-agents.mjs collect [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] --status <status> [--findings <text>] [--changed-files <text>] [--verification <text>] [--blockers <text>] [--assumptions <text>] [--next <text>] [--decision-coverage <text>] [--completion-coverage <text>] [--source-spec-coverage <text>] [--expected-outcome <text>] [--actual-result <text>] [--reproduction-or-evidence <text>] [--failure-point <text>] [--hypothesis-branches <text>] [--source-of-truth-boundary <text>] [--plugin-contract-boundary <text>] [--generated-artifact-boundary <text>] [--before-context-effects <text>] [--after-context-effects <text>] [--cross-feature-consequences <text>] [--root-cause <text>] [--fix-summary <text>] [--verification-evidence <text>] [--skipped-checks <text>] [--unresolved-risks <text>] [--next-investigation <text>]
   node bin/coding-agents.mjs run|orchestrate [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] [--hierarchy-mode none|one_level|n_level] [--max-depth <n>] [--depth <n>] [--remaining-depth <n>] [--heartbeat-interval <ISO-8601 duration>] [--heartbeat-deadline <ISO-8601 duration>] [--max-silence <ISO-8601 duration>] [--soft-timeout <ISO-8601 duration>] [--hard-timeout <ISO-8601 duration>] [--no-interrupt-until <ISO-8601 duration>] --assignment <text> --expected-output <text> [--runner codex-cli] [--timeout-ms <ms>]
   node bin/coding-agents.mjs verify-assignments [--cwd <path>] [--target-cwd <path>]
   node bin/coding-agents.mjs normalize-debugging-integrity [--cwd <path>] [--target-cwd <path>] [--execute]
@@ -3184,6 +3540,7 @@ State:
   ${CODING_CONDUCT_GATE_NAME}: ${CODING_CONDUCT_CONTRACT}
   Debug or repair work must identify root cause and verify the intended outcome; log-only, fallback-only, skip-only, failure-output-only, or return-to-main-loop-only changes are not completion.
   Gate-required source-change/debug/repair/source-of-truth/plugin-contract/generated-artifact inconsistency work also carries ${METACOGNITIVE_GATE_NAME} fields and rejects completed collection without them.
+  Completed parent-integration packets also carry ${CONTRACT_COVERAGE_GATE_NAME}: every D-* accepted decision and C-* completion condition must be mapped to concrete implementation and verification evidence.
 `);
 }
 
@@ -3221,6 +3578,23 @@ function getFieldValues(section, field) {
     if (entry.field !== field) continue;
     const value = entry.value.trim();
     if (value) values.push(value);
+  }
+  return values;
+}
+
+function getAnyFieldValue(section, field) {
+  const value = getAnyFieldValues(section, field)[0];
+  return value ? value : null;
+}
+
+function getAnyFieldValues(section, field) {
+  const values = [];
+  for (const block of getStructuralFieldBlocks(section)) {
+    for (const entry of block) {
+      if (entry.field !== field) continue;
+      const value = entry.value.trim();
+      if (value) values.push(value);
+    }
   }
   return values;
 }

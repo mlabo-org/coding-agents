@@ -13,6 +13,25 @@ const SELF_REPORT_GUIDANCE =
 const CODING_CONDUCT_RULES =
   /coding_conduct_rules: .*GitHub\/npm OSS.*do not reimplement.*first principles.*fallback implementations.*main-flow errors/;
 
+function contractCoverageArgs(taskId) {
+  const decisions = Array.from({ length: 8 }, (_, index) => `D-${taskId}-${String(index + 1).padStart(3, "0")}`);
+  const completions = Array.from({ length: 10 }, (_, index) => `C-${taskId}-${String(index + 1).padStart(3, "0")}`);
+  return [
+    "--contract-coverage",
+    "required",
+    "--decision-coverage",
+    decisions
+      .map((id) => `${id}: verified in .coding-agents decisions.md, runner.md, and node bin/coding-agents.mjs verify-assignments output for ${id}`)
+      .join(" | "),
+    "--completion-coverage",
+    completions
+      .map((id) => `${id}: verified by .coding-agents task.md, assignments.md, runner.md fields, and doctor output for ${id}`)
+      .join(" | "),
+    "--source-spec-coverage",
+    "no source specs in scope: checked task.md decisions.md and documentation scope before collection",
+  ];
+}
+
 test("runner commands require matching intake state before writing runner state", () => {
   const repo = makeTempGitRepo();
   try {
@@ -773,6 +792,7 @@ test("verify rejects completed codex-cli runner results until parent integration
       "parent integration recorded",
       "--next",
       "retire completed subagent",
+      ...contractCoverageArgs("uncollected-runner"),
     ]);
     assert.equal(collect.status, 0, collect.stderr);
 
@@ -985,6 +1005,7 @@ test("omitted feature profile remains backwards compatible and records none", ()
       "README.md",
       "--verification",
       "not run",
+      ...contractCoverageArgs("profile-none"),
     ]);
     assert.equal(collected.status, 0, collected.stderr);
     const runner = readState(repo, "runner.md");
