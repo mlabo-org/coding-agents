@@ -1,7 +1,7 @@
 ---
 name: coding-agents
 description: >-
-  Coding Agents source workflow for intake, .coding-agents state, scoped assignments, finite delegation, worker-result collection, task finalization/Contract Coverage, handoff/audit, and debug/source-change gates. Excludes generic edits and docs/codex alone.
+  Coding Agents explicit-only legacy workflow. Use only when the user names Coding Agents/coding-agents or asks to continue, audit, or repair existing .coding-agents state or the Coding Agents source CLI. Never auto-route generic coding, debug, source changes, delegation, or subagent coordination.
 ---
 
 # Coding Agents
@@ -12,8 +12,9 @@ Codex は、本書の発火前提、作業手順、ツール境界、ファイ�
 
 ## Trigger Boundary
 
-- Use this skill only when the user explicitly asks for the `coding-agents` plugin, Coding Agents workflow, source CLI, subagent development team coordination, `.coding-agents` workflow state, task_id/epoch/scope/lifecycle assignments, finite delegation depth, subagent supervision or cancellation policy, assign/collect/finalize/run orchestration, worker-result collection, task finalization, handoff generation, workflow audit, or legacy `docs/codex` migration.
-- Do not trigger this skill for ordinary one-off code edits, reviews, or explanations unless the user connects the work to Coding Agents.
+- Use this skill only when the user explicitly names `Coding Agents` or `coding-agents`, or asks to continue, audit, or repair existing `.coding-agents` workflow state or the Coding Agents source CLI.
+- Never auto-route this skill for generic coding, debugging or repair, source changes, code review, delegation, multi-agent work, subagent coordination, supervision, or cancellation. Those concepts become available capabilities only after a valid explicit trigger.
+- After a valid explicit trigger, preserve the existing intake, assign, collect, finalize, run, orchestrate, handoff, and audit behavior. This boundary changes discovery and selection only, not source CLI functionality.
 - Do not trigger this skill merely because a repository contains `docs/codex`. Legacy `docs/codex` is a migration source, not proof that the current workflow is active.
 - Do not perform legacy migration apply, plugin cache refresh, marketplace updates, or restart/reload actions unless the active user request includes that boundary.
 
