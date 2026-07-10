@@ -6,7 +6,7 @@ behavior. It is not workflow state and must not be treated as a generated
 
 ## Confirmed Boundary
 
-Items 1-9 are Coding Agents self changes. Item 10 is external legacy cleanup.
+Items 1-10 are Coding Agents self changes. Item 11 is external legacy cleanup.
 
 1. State directory
    - Coding Agents runtime/workflow state belongs under `<git-root>/.coding-agents/`.
@@ -32,20 +32,22 @@ Items 1-9 are Coding Agents self changes. Item 10 is external legacy cleanup.
 
 3. Conditional runner log
    - `runner.md` is an operational log, not a universal required source document.
-   - Create or update it only when runner, assignment dispatch, parent-integration
-     packet, or process-result activity actually occurs.
+   - Create or update it only when runner, assignment dispatch, worker-result
+     collection, task-finalization, or process-result activity actually occurs.
+   - Existing legacy `parent-integration` packets remain readable for backward
+     validation; new commands do not emit that legacy packet type.
    - Do not require `runner.md` for unrelated intake/spec/documentation flows.
 
 4. Subagent workflow-state lifecycle
-   - Subagents must return concise parent-integration material and must not stay
+   - Subagents must return concise worker-result material and must not stay
      open waiting for more work after returning it.
    - `collect` requires `--lifecycle-disposition state_retired` or
      `--lifecycle-disposition continuation_expected`. `state_retired` requires
      exactly one allowed `--cancel-reason`; `continuation_expected` rejects a
      cancel reason and records `cancel_reason: none`.
    - Current task state records `lifecycle_contract_version: workflow_state_v1`
-     and `lifecycle_contract_effective_at`. New parent-integration packets
-     record the same lifecycle contract version,
+     and `lifecycle_contract_effective_at`. New `worker-result-collection`
+     packets record the same lifecycle contract version,
      `lifecycle_scope: workflow_state_only`, the selected
      `lifecycle_disposition`, `cancel_reason`,
      `runtime_thread_disposition: unmanaged_by_workflow_cli`, and
@@ -163,7 +165,34 @@ Items 1-9 are Coding Agents self changes. Item 10 is external legacy cleanup.
      not completion, and must leave the failing main flow and removal condition
      visible.
 
-9. Nested Coding Agents preflight suppression
+9. Worker-result collection and task finalization
+   - `collect` records a `worker-result-collection` packet plus its
+     workflow-state-only lifecycle disposition. Completed collection does not
+     require complete task-wide D-*/C-*/source-spec coverage, and multiple
+     worker results may be collected before the task is finalized.
+   - A collection may carry `finalization_references` relevant to that worker's
+     result. Generated assignment and runner prompts ask workers for concise
+     typed references, while the parent owns the complete task-wide map.
+   - `finalize` is the only command that records a modern
+     `task-finalization` packet. It requires the current `task_id`, `epoch`, and
+     `scope`, validates complete active decision, completion-condition, and
+     source/spec coverage, and appends the packet only after validation passes.
+   - Language-neutral typed references accepted by this contract are
+     `file:<path>` or `path:<path>`, `command:<command> exit:<integer>`,
+     `artifact:<ref>`, `packet:<collected-ref>` or
+     `collected-packet:<ref>`, `role:<collected-role>` or
+     `collected-role:<role>`, and
+     `test:<name> result:<pass|fail|integer>`.
+   - Placeholder-only `done`, `checked`, and `ok` values remain invalid.
+     `bin/coding-agents.mjs` and its contract tests own the acceptance
+     predicates; this specification records the command boundary and artifact
+     contract rather than replacing executable validation.
+   - `verify-assignments` and `doctor` validate modern task-finalization
+     packets. Legacy `parent-integration` packets remain readable for backward
+     validation, and the strict lifecycle rules remain attached to modern
+     worker-result collections rather than task-finalization packets.
+
+10. Nested Coding Agents preflight suppression
    - Parent-managed child workers operate under a Coding Agents assignment that
      the parent already selected.
    - Generated assignments, runner prompts, runner packets, and handoff material
@@ -180,7 +209,7 @@ Items 1-9 are Coding Agents self changes. Item 10 is external legacy cleanup.
      contract. They cannot broaden scope, depth, permissions, or cancellation
      authority.
 
-10. Legacy migration and cleanup
+11. Legacy migration and cleanup
    - Existing legacy locations are cleaned through an explicit migration workflow,
      not by silent deletion or broad automatic rewriting.
    - The migration workflow must perform a preflight backup before destructive or
@@ -210,9 +239,10 @@ Future implementation work should preserve this split:
 - Generated job state must preserve nested Coding Agents preflight suppression,
   finite delegation depth, subagent supervision and cancellation rules,
   workflow-state lifecycle disposition without runtime-thread closure claims,
-  concise integration-output rules, the Coding
-  Conduct Gate, debug root-cause completion requirements, and metacognitive
-  context-impact checks for gate-required work.
+  concise worker-result and result-reference rules, parent-owned task
+  finalization with typed Contract Coverage, the Coding Conduct Gate, debug
+  root-cause completion requirements, and metacognitive context-impact checks
+  for gate-required work.
 - Stale generated state must be normalized explicitly before verification is
   treated as current.
 - Legacy cleanup work may inspect external target repositories but must remain

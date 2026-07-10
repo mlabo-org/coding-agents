@@ -1,7 +1,7 @@
 {
   "name": "coding-agents",
   "version": "0.1.0",
-  "description": "Coding Agents workflow/source CLI for explicit intake, jobsite .coding-agents state, scoped assignments, finite delegation, supervision, handoff/audit, Coding Conduct, Contract Coverage decision/completion evidence, source-change and DEBUG gates. Primary route: use coding-agents workflow. Fallback: generic edits or docs/codex stay out unless explicitly scoped.",
+  "description": "Coding Agents source CLI workflow for explicit .coding-agents intake, scoped assignments, finite delegation, worker-result collection, typed Contract Coverage finalization, handoff/audit, Coding Conduct, and source-change/debug gates. Primary for Coding Agents work; excludes generic edits and docs/codex-only tasks.",
   "skills": "./skills/",
   "keywords": [
     "coding-agents",
@@ -15,13 +15,16 @@
     "decision-coverage",
     "completion-conditions",
     "source-spec-coverage",
+    "worker-result-collection",
+    "task-finalization",
+    "typed-evidence",
     "metacognitive-debug",
     "source-change"
   ],
   "interface": {
     "displayName": "Coding Agents",
-    "shortDescription": "Target-repo intake, fixed role scaffold, supervised scoped assignment packets, finite delegation, Contract Coverage, Coding Conduct, source-change, DEBUG, repair, audit, and context-impact checks.",
-    "longDescription": "Local source workflow for resolving a jobsite or explicit target repository, recording .coding-agents state, and preparing parent-managed scoped assignment packets. Covers finite delegation, worker supervision evidence, intake, planning, audit, Contract Coverage for accepted decisions and completion conditions, Coding Conduct, source-change, DEBUG/root-cause, repair, and context-impact review without implying resident agents are active.",
+    "shortDescription": "Explicit Coding Agents intake, scoped assignments, supervised worker-result collection, task finalization with typed Contract Coverage, handoff/audit, and source-change/debug gates.",
+    "longDescription": "Local source workflow for resolving a jobsite or explicit target repository, recording .coding-agents state, and preparing parent-managed scoped assignment packets. Covers finite delegation, worker supervision, repeated worker-result collection with workflow-only lifecycle state, distinct task finalization with typed D/C/source-spec Contract Coverage, Coding Conduct, handoff/audit, source-change, debug/root-cause, repair, and context-impact review without implying resident agents are active.",
     "developerName": "suzukimakoto",
     "category": "Productivity",
     "capabilities": [
@@ -31,9 +34,9 @@
       "Audit"
     ],
     "defaultPrompt": [
-      "Run Coding Agents intake for this target repo.",
-      "Create supervised Coding Agents scoped assignment packets for this active task.",
-      "Audit completed Coding Agents work and summarize Contract Coverage evidence."
+      "Run Coding Agents intake and create supervised scoped assignment packets for this target repo.",
+      "Collect each Coding Agents worker result and record its workflow-only lifecycle disposition.",
+      "Finalize task-wide typed D/C/source-spec Contract Coverage, then audit the Coding Agents task."
     ],
     "brandColor": "#2563EB"
   },

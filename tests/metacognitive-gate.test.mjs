@@ -56,19 +56,29 @@ const META_ARGS = [
 function contractCoverageArgs(taskId) {
   const decisions = Array.from({ length: 8 }, (_, index) => `D-${taskId}-${String(index + 1).padStart(3, "0")}`);
   const completions = Array.from({ length: 10 }, (_, index) => `C-${taskId}-${String(index + 1).padStart(3, "0")}`);
+  const refs = [
+    "file:bin/coding-agents.mjs",
+    "path:tests/metacognitive-gate.test.mjs",
+    "command:node --check bin/coding-agents.mjs exit:0",
+    "artifact:.coding-agents/runner.md",
+    "collected-packet:Implementer-e1",
+    "collected-role:Reviewer",
+    "test:metacognitive-gate result:pass",
+    "packet:Test-Runner-e1 role:Test-Runner",
+  ];
   return [
     "--contract-coverage",
     "required",
     "--decision-coverage",
     decisions
-      .map((id) => `${id}: verified in .coding-agents decisions.md, runner.md, and node bin/coding-agents.mjs verify-assignments output for ${id}`)
+      .map((id, index) => `${id}: 日本語の確認記録 ${refs[index % refs.length]}`)
       .join(" | "),
     "--completion-coverage",
     completions
-      .map((id) => `${id}: verified by .coding-agents task.md, assignments.md, runner.md fields, and doctor output for ${id}`)
+      .map((id, index) => `${id}: 日本語の完了記録 ${refs[index % refs.length]}`)
       .join(" | "),
     "--source-spec-coverage",
-    "no source specs in scope: checked task.md decisions.md and documentation scope before collection",
+    "仕様範囲を確認 path:.coding-agents/task.md",
   ];
 }
 
@@ -308,7 +318,7 @@ test("collect rejects completed gate-required packets without metacognitive fiel
   }
 });
 
-test("collect rejects completed packets without concrete contract coverage", () => {
+test("collect permits worker completion without global coverage and finalize enforces typed task coverage atomically", () => {
   const repo = makeTempGitRepo();
   try {
     const taskId = "contract-coverage";
@@ -329,7 +339,7 @@ test("collect rejects completed packets without concrete contract coverage", () 
     ]);
     assert.equal(intake.status, 0, intake.stderr);
 
-    const missingCoverage = runCli([
+    const collected = runCli([
       "collect",
       "--target-cwd",
       repo,
@@ -352,16 +362,17 @@ test("collect rejects completed packets without concrete contract coverage", () 
       "--verification",
       "not run",
     ]);
-    assert.notEqual(missingCoverage.status, 0);
-    assert.match(missingCoverage.stderr, /Contract Coverage Gate/);
-    assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
+    assert.equal(collected.status, 0, collected.stderr);
+    assert.match(collected.stdout, /ok worker-result-collection: Docs Keeper/);
+    const runnerPath = path.join(repo, ".coding-agents", "runner.md");
+    const collectedRunner = readFileSync(runnerPath, "utf8");
+    assert.match(collectedRunner, /type: worker-result-collection/);
+    assert.doesNotMatch(collectedRunner, /type: task-finalization/);
 
-    const lowInfoCoverage = runCli([
-      "collect",
+    const missingCoverage = runCli([
+      "finalize",
       "--target-cwd",
       repo,
-      "--role",
-      "Docs Keeper",
       "--task-id",
       taskId,
       "--epoch",
@@ -370,14 +381,24 @@ test("collect rejects completed packets without concrete contract coverage", () 
       "README.md",
       "--work-type",
       "documentation",
-      "--status",
-      "completed",
-      "--findings",
-      "documentation update complete",
-      "--changed-files",
+    ]);
+    assert.notEqual(missingCoverage.status, 0);
+    assert.match(missingCoverage.stderr, /decision_coverage\.D-contract-coverage-001/);
+    assert.match(missingCoverage.stderr, /accepted typed references: file:<path>.*command:<command> exit:<integer>/);
+    assert.equal(readFileSync(runnerPath, "utf8"), collectedRunner, "rejected finalize must not mutate runner.md");
+
+    const placeholderCoverage = runCli([
+      "finalize",
+      "--target-cwd",
+      repo,
+      "--task-id",
+      taskId,
+      "--epoch",
+      "e1",
+      "--scope",
       "README.md",
-      "--verification",
-      "not run",
+      "--work-type",
+      "documentation",
       "--contract-coverage",
       "required",
       "--decision-coverage",
@@ -385,17 +406,16 @@ test("collect rejects completed packets without concrete contract coverage", () 
       "--completion-coverage",
       Array.from({ length: 10 }, (_, index) => `C-${taskId}-${String(index + 1).padStart(3, "0")}: done`).join(" | "),
       "--source-spec-coverage",
-      "done",
+      "ok",
     ]);
-    assert.notEqual(lowInfoCoverage.status, 0);
-    assert.match(lowInfoCoverage.stderr, /decision_coverage|completion_coverage|source_spec_coverage/);
+    assert.notEqual(placeholderCoverage.status, 0);
+    assert.match(placeholderCoverage.stderr, /decision_coverage|completion_coverage|source_spec_coverage/);
+    assert.equal(readFileSync(runnerPath, "utf8"), collectedRunner, "placeholder rejection must be atomic");
 
-    const accepted = runCli([
-      "collect",
+    const finalized = runCli([
+      "finalize",
       "--target-cwd",
       repo,
-      "--role",
-      "Docs Keeper",
       "--task-id",
       taskId,
       "--epoch",
@@ -404,17 +424,87 @@ test("collect rejects completed packets without concrete contract coverage", () 
       "README.md",
       "--work-type",
       "documentation",
-      "--status",
-      "completed",
-      "--findings",
-      "documentation update complete",
-      "--changed-files",
-      "README.md",
-      "--verification",
-      "not run",
       ...contractCoverageArgs(taskId),
     ]);
-    assert.equal(accepted.status, 0, accepted.stderr);
+    assert.equal(finalized.status, 0, finalized.stderr);
+    assert.match(finalized.stdout, /ok task-finalization: contract-coverage/);
+    const validRunner = readFileSync(runnerPath, "utf8");
+    assert.match(validRunner, /type: task-finalization/);
+    assert.match(validRunner, /D-contract-coverage-001: 日本語の確認記録 file:bin\/coding-agents\.mjs/);
+    assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
+    assert.equal(runCli(["doctor", "--target-cwd", repo]).status, 0);
+
+    const tamperedRunner = validRunner.replace(
+      "D-contract-coverage-001: 日本語の確認記録 file:bin/coding-agents.mjs",
+      "D-contract-coverage-001: done",
+    );
+    assert.notEqual(tamperedRunner, validRunner);
+    writeFileSync(runnerPath, tamperedRunner, "utf8");
+    const verifyTampered = runCli(["verify-assignments", "--target-cwd", repo]);
+    assert.notEqual(verifyTampered.status, 0);
+    assert.match(verifyTampered.stdout, /task-finalization.*decision_coverage\.D-contract-coverage-001/);
+    assert.match(verifyTampered.stdout, /accepted typed references: file:<path>/);
+    const doctorTampered = runCli(["doctor", "--target-cwd", repo]);
+    assert.notEqual(doctorTampered.status, 0);
+    assert.match(doctorTampered.stdout, /decision_coverage\.D-contract-coverage-001/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("repeated completed worker collections do not require task-wide coverage", () => {
+  const repo = makeTempGitRepo();
+  try {
+    const taskId = "repeated-collect";
+    const intake = runCli([
+      "intake",
+      "--target-cwd",
+      repo,
+      "--work-type",
+      "documentation",
+      "--task",
+      "Collect multiple worker documentation results",
+      "--task-id",
+      taskId,
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+    ]);
+    assert.equal(intake.status, 0, intake.stderr);
+
+    for (const role of ["Implementer", "Reviewer"]) {
+      const collected = runCli([
+        "collect",
+        "--target-cwd",
+        repo,
+        "--role",
+        role,
+        "--task-id",
+        taskId,
+        "--epoch",
+        "e1",
+        "--scope",
+        "README.md",
+        "--work-type",
+        "documentation",
+        "--status",
+        "completed",
+        "--findings",
+        `${role} result`,
+        "--changed-files",
+        "README.md",
+        "--verification",
+        "not run",
+      ]);
+      assert.equal(collected.status, 0, collected.stderr);
+    }
+
+    const runner = readState(repo, "runner.md");
+    assert.equal((runner.match(/^- type: worker-result-collection$/gm) || []).length, 2);
+    assert.doesNotMatch(runner, /type: task-finalization/);
+    assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
+    assert.equal(runCli(["doctor", "--target-cwd", repo]).status, 0);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -581,7 +671,7 @@ test("documentation work type suppresses keyword and path inference for docs-onl
     ]);
     assert.equal(collected.status, 0, collected.stderr);
     const runner = readState(repo, "runner.md");
-    assert.match(runner, /type: parent-integration[\s\S]*work_type: documentation/);
+    assert.match(runner, /type: worker-result-collection[\s\S]*work_type: documentation/);
     assert.doesNotMatch(runner, /metacognitive_gate_required: true/);
     assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
   } finally {

@@ -16,7 +16,7 @@ const DEFAULT_RUNNER_TIMEOUT_MS = 120000;
 const SUBAGENT_LIFECYCLE =
   "Parent records workflow-state disposition with collect: state_retired requires exactly one allowed cancel_reason, while continuation_expected records cancel_reason none. This workflow CLI does not interrupt, close, or reclaim runtime threads.";
 const CHILD_RETURN_LIFECYCLE =
-  "Return concise parent-integration material and stop; do not stay open waiting for more work.";
+  "Return concise worker-result material and stop; do not stay open waiting for more work.";
 const DEBUG_INTEGRITY =
   "For debug or repair work, identify root cause and make the intended outcome succeed; log-only, fallback-only, skip-only, failure-output-only, or return-to-main-loop-only changes are not completion.";
 const CODING_CONDUCT_GATE_NAME = "Coding Conduct Gate";
@@ -30,7 +30,7 @@ const METACOGNITIVE_GATE_NAME = "Meta-Cognitive Debug/Repair Gate";
 const METACOGNITIVE_GATE_CONTRACT =
   "For gate-required source-change/debug/repair/SOT/plugin-contract/generated-artifact inconsistency work, explicitly capture before/after context effects, cross-feature consequences, root cause, fix, verification evidence, skipped checks, unresolved risks, and next investigation.";
 const METACOGNITIVE_GATE_COMPLETION_PROMPT =
-  "Assignment and skeleton packets expose this schema only; completed parent-integration or process-runner-result packets must fill every listed field with actual evidence.";
+  "Assignment and skeleton packets expose this schema only; completed worker-result-collection or process-runner-result packets must fill every listed field with actual evidence.";
 const METACOGNITIVE_PRE_GATE_BLOCKER =
   "pre-metacognitive-gate packet claimed completion without the required metacognitive result fields";
 const METACOGNITIVE_PRE_GATE_NEXT =
@@ -42,10 +42,17 @@ const CONTRACT_COVERAGE_FIELDS = [
   "completion_coverage",
   "source_spec_coverage",
 ];
+const WORKER_RESULT_COLLECTION_TYPE = "worker-result-collection";
+const TASK_FINALIZATION_TYPE = "task-finalization";
+const FINALIZATION_REFERENCES_FIELD = "finalization_references";
+const CONTRACT_COVERAGE_TYPED_REFERENCE_FORMS =
+  "file:<path>, path:<path>, command:<command> exit:<integer>, artifact:<ref>, packet:<collected-ref>, role:<collected-role>, collected-packet:<ref>, collected-role:<role>, or test:<name> result:<pass|fail|integer>";
 const CONTRACT_COVERAGE_CONTRACT =
-  "Completed parent-integration packets must map every active accepted decision (D-*) and completion condition (C-*) to concrete implementation and verification evidence before completion is accepted.";
+  "Task-finalization packets must map every active accepted decision (D-*) and completion condition (C-*) to deterministic typed references before finalization is accepted; worker-result collections do not require task-wide coverage.";
 const CONTRACT_COVERAGE_COMPLETION_PROMPT =
-  "Generic done/checked/ok self-reports are not evidence; quote or name the decision/condition id and attach paths, commands, tests, artifacts, or explicit no-source-spec-in-scope evidence.";
+  `Each finalization ID segment and source_spec_coverage must include a typed reference (${CONTRACT_COVERAGE_TYPED_REFERENCE_FORMS}); placeholder-only done/checked/ok values are rejected.`;
+const WORKER_FINALIZATION_REFERENCE_PROMPT =
+  `Return concise typed references relevant to this worker result for parent finalization (${CONTRACT_COVERAGE_TYPED_REFERENCE_FORMS}); the parent owns complete D-*/C-*/source-spec coverage.`;
 const NESTED_CODING_AGENTS_PREFLIGHT =
   "Parent already selected Coding Agents for this parent-managed scoped assignment; do not ask `coding-agents を使いますか？ [Y/n]` and do not start an independent nested Coding Agents workflow. Delegate descendants only when finite hierarchy fields grant remaining_depth > 0, keeping the same task_id/epoch/scope lineage and inherited supervision. Proceed directly within the assigned task_id/epoch/scope, but stop before scope expansion, destructive operations, external sending, commits, cache refresh, plugin activation, or unrelated edits.";
 const SUPERVISION_CONTRACT_NAME = "Subagent Supervision Contract";
@@ -260,6 +267,7 @@ function main() {
     else if (args.command === "normalize-debugging-integrity") normalizeDebuggingIntegrity(args);
     else if (args.command === "assign") assign(args);
     else if (args.command === "collect") collect(args);
+    else if (args.command === "finalize") finalize(args);
     else if (args.command === "run" || args.command === "orchestrate") run(args);
     else fail(`unknown command: ${args.command}`, 1);
   } catch (error) {
@@ -374,8 +382,8 @@ function collect(args) {
   const commandContext = resolveCommandContext(args);
   const packet = requireIntegrationPacket(args, commandContext);
   assertValidIntakeForPacket(commandContext, packet, "collect");
-  appendRunnerEntry(commandContext, "Parent Integration Packets", renderIntegrationPacket(packet));
-  console.log(`ok parent-integration: ${packet.role}`);
+  appendRunnerEntry(commandContext, "Worker Result Collections", renderIntegrationPacket(packet));
+  console.log(`ok worker-result-collection: ${packet.role}`);
   console.log(`ok status: ${packet.status}`);
   console.log(`ok task_id: ${packet.taskId}`);
   console.log(`ok feature_profile: ${featureProfileId(packet)}`);
@@ -385,6 +393,20 @@ function collect(args) {
   console.log(`ok cancel_reason: ${packet.cancelReason}`);
   console.log(`ok runtime_thread_disposition: ${packet.runtimeThreadDisposition}`);
   console.log(`ok runtime_changed: ${packet.runtimeChanged}`);
+}
+
+function finalize(args) {
+  const commandContext = resolveCommandContext(args);
+  const packet = requireTaskFinalizationPacket(args, commandContext);
+  assertValidIntakeForPacket(commandContext, packet, "finalize");
+  validateTaskFinalizationContractCoveragePacket(packet);
+  appendRunnerEntry(commandContext, "Task Finalizations", renderTaskFinalizationPacket(packet));
+  console.log(`ok task-finalization: ${packet.taskId}`);
+  console.log(`ok status: ${packet.status}`);
+  console.log(`ok task_id: ${packet.taskId}`);
+  console.log(`ok epoch: ${packet.epoch}`);
+  console.log(`ok scope: ${packet.scope}`);
+  console.log(`ok work_type: ${workTypeId(packet)}`);
 }
 
 function run(args) {
@@ -520,6 +542,7 @@ function normalizeCodexResult(packet, context) {
     assignment: packet.assignment,
     expectedOutput: packet.expectedOutput,
     summary: summarizeRunnerOutput(summarySource),
+    finalizationReferences: getFieldValue(summarySource, FINALIZATION_REFERENCES_FIELD) || "none",
     failure,
     metacognitiveGate: packet.metacognitiveGate,
     metacognitiveFields,
@@ -536,7 +559,7 @@ function runnerFailure({ result, exitCode, timedOut, unavailable, timeoutMs }) {
 }
 
 function renderRunnerPrompt(packet) {
-  return `You are a Coding Agents child worker. Follow this assignment exactly and return concise parent-integration material only.
+  return `You are a Coding Agents child worker. Follow this assignment exactly and return concise worker-result material only.
 
 role: ${packet.role}
 task_id: ${packet.taskId}
@@ -577,7 +600,7 @@ Return exactly these sections, kept concise:
 - verification:
 - blockers:
 - unresolved_assumptions:
-${renderContractCoverageReturnSections(packet)}
+- ${FINALIZATION_REFERENCES_FIELD}:
 ${renderMetacognitiveReturnSections(packet)}
 - next:
 `;
@@ -787,13 +810,13 @@ function taskCompletionConditions(context) {
   return [
     { id: `${prefix}-001`, text: `Eight planning files exist in \`${STATE_DIR_NAME}\`.` },
     { id: `${prefix}-002`, text: "Fixed 14-role assignment scaffold sections include `role`, `status`, `task_id`, `epoch`, `scope`, `assignment`, `expected_output`, and `lifecycle`." },
-    { id: `${prefix}-003`, text: `Current task state and each new parent-integration packet carry lifecycle_contract_version=${LIFECYCLE_CONTRACT_VERSION}; current packets cannot fall back to unknown_legacy.` },
+    { id: `${prefix}-003`, text: `Current task state and each new worker-result-collection packet carry lifecycle_contract_version=${LIFECYCLE_CONTRACT_VERSION}; current packets cannot fall back to unknown_legacy.` },
     { id: `${prefix}-004`, text: "Each generated child-worker prompt, assignment, handoff, and runner packet carries the nested Coding Agents preflight suppression rule." },
     { id: `${prefix}-005`, text: `Each generated child-worker prompt, assignment, handoff, and modern runner packet carries the ${SUPERVISION_CONTRACT_NAME}.` },
     { id: `${prefix}-006`, text: `Each generated assignment, handoff, and modern runner packet carries the ${CODING_CONDUCT_GATE_NAME}.` },
     { id: `${prefix}-007`, text: "Debug or repair work is not complete until root cause is identified, fixed, and verified against the intended outcome." },
-    { id: `${prefix}-008`, text: "If `metacognitive_gate_required: true`, assignments, runner prompts, runner packets, and completed parent-integration packets must carry all metacognitive gate fields." },
-    { id: `${prefix}-009`, text: "Completed parent-integration packets carry Contract Coverage Gate evidence for every active D-* accepted decision and C-* completion condition." },
+    { id: `${prefix}-008`, text: "If `metacognitive_gate_required: true`, assignments, runner prompts, runner packets, and completed worker-result-collection packets must carry all metacognitive gate fields." },
+    { id: `${prefix}-009`, text: "A task-finalization packet carries typed Contract Coverage references for every active D-* accepted decision, C-* completion condition, and source/spec check." },
     { id: `${prefix}-010`, text: "Handoff prompt is available for the next worker." },
   ];
 }
@@ -856,7 +879,7 @@ function renderDecisions(context) {
 
 ## D-${context.taskId}-003 Workflow-State Lifecycle
 
-- accepted: subagents return concise parent-integration material and do not remain open waiting for more work.
+- accepted: subagents return concise worker-result material and do not remain open waiting for more work.
 - impact: parent records each collected result as \`state_retired\` with exactly one allowed \`cancel_reason\`, or as \`continuation_expected\` with \`cancel_reason: none\`; the workflow CLI does not interrupt, close, or reclaim runtime threads.
 - contract_coverage_required: evidence must name collected worker results and workflow-state disposition, or state that no workers were spawned.
 
@@ -921,7 +944,7 @@ function renderAudit(context) {
 - Record ${CODING_CONDUCT_GATE_NAME} checks, including OSS reuse decision, first-principles bug analysis when applicable, and no hidden fallback implementation.
 - For debug or repair work, record root cause, fix, and verification that the intended outcome now succeeds.
 - If metacognitive_gate_required is true, record ${METACOGNITIVE_GATE_FIELDS.join(", ")}.
-- Record ${CONTRACT_COVERAGE_GATE_NAME}: ${CONTRACT_COVERAGE_FIELDS.join(", ")}. Completed work is not accepted until every D-* decision and C-* completion condition has concrete implementation and verification evidence.
+- Record ${CONTRACT_COVERAGE_GATE_NAME}: ${CONTRACT_COVERAGE_FIELDS.join(", ")}. Task finalization is not accepted until every D-* decision, C-* completion condition, and source/spec check has a deterministic typed reference.
 `;
 }
 
@@ -1025,9 +1048,10 @@ ${renderMetacognitiveGateState(context.metacognitiveGate)}
 
 ${CONTRACT_COVERAGE_GATE_NAME}:
 ${renderContractCoverageGateState(context)}
+- ${WORKER_FINALIZATION_REFERENCE_PROMPT}
 
 Subagent lifecycle:
-- Child workers return concise parent-integration material and stop instead of waiting for more work.
+- Child workers return concise worker-result material with relevant typed finalization references and stop instead of waiting for more work.
 - The parent records \`state_retired\` with exactly one allowed \`cancel_reason\`, or \`continuation_expected\` with \`cancel_reason: none\`, when collecting a result.
 - These fields describe workflow state only; the workflow CLI does not interrupt, close, or reclaim a runtime thread, and process exit or interruption is not closure evidence.
 - If more work is needed after a stale premise, scope change, or failed verification, issue a fresh scoped assignment with current \`task_id\`, \`epoch\`, and \`scope\`.
@@ -1066,7 +1090,7 @@ function normalizeReadmeDebugIntegrity(text, context = {}) {
 function normalizeTaskDebugIntegrity(text, context = {}) {
   const block = "- Debug or repair work is not complete until root cause is identified, fixed, and verified against the intended outcome.";
   const lifecycleLine =
-    "- Each generated assignment carries lifecycle guidance, and each new parent-integration packet records workflow-state disposition without claiming runtime-thread closure.";
+    "- Each generated assignment carries lifecycle guidance, and each new worker-result-collection packet records workflow-state disposition without claiming runtime-thread closure.";
   let next = stripGeneratedWorkflowSurroundings(text).replace(
     new RegExp(
       `^- Each generated assignment carries lifecycle guidance\\n${escapeRegExp(block)} requiring concise integration material and prompt close/retire handling\\.$`,
@@ -1181,7 +1205,7 @@ function normalizeRunnerDebugIntegrity(text, context = {}) {
 
 function normalizeRunnerPacketDebugIntegrity(section) {
   const type = getFieldValue(section, "type");
-  if (!["assignment", "parent-integration", "process-orchestration-skeleton", "process-runner-result"].includes(type)) {
+  if (!["assignment", WORKER_RESULT_COLLECTION_TYPE, "parent-integration", "process-orchestration-skeleton", "process-runner-result"].includes(type)) {
     return section;
   }
   if (getFieldValue(section, "debugging_integrity")) return section;
@@ -1248,7 +1272,7 @@ function normalizeRunnerPreambleCodingConduct(text) {
 
 function normalizeRunnerPacketCodingConduct(section) {
   const type = getFieldValue(section, "type");
-  if (!["assignment", "parent-integration", "process-orchestration-skeleton", "process-runner-result"].includes(type)) {
+  if (!["assignment", WORKER_RESULT_COLLECTION_TYPE, "parent-integration", "process-orchestration-skeleton", "process-runner-result"].includes(type)) {
     return section;
   }
   if (runnerPacketUsesLegacySchema(section) && !hasAnyCodingConductField(section)) return section;
@@ -1331,7 +1355,7 @@ function normalizeRunnerPreambleSupervision(text) {
 
 function normalizeRunnerPacketSupervision(section) {
   const type = getFieldValue(section, "type");
-  if (!["assignment", "parent-integration", "process-orchestration-skeleton", "process-runner-result"].includes(type)) {
+  if (!["assignment", WORKER_RESULT_COLLECTION_TYPE, "parent-integration", "process-orchestration-skeleton", "process-runner-result"].includes(type)) {
     return section;
   }
   if (!runnerPacketRequiresSupervision(section)) return section;
@@ -1494,7 +1518,7 @@ ${renderContractCoverageGateState(context)}`;
 
 function normalizeRunnerPacketMetacognitiveGate(section, workflowGate) {
   const type = getFieldValue(section, "type");
-  if (!["assignment", "parent-integration", "process-orchestration-skeleton", "process-runner-result"].includes(type)) {
+  if (!["assignment", WORKER_RESULT_COLLECTION_TYPE, "parent-integration", "process-orchestration-skeleton", "process-runner-result"].includes(type)) {
     return section;
   }
   const packetGate = runnerPacketMetacognitiveRequired(section, workflowGate);
@@ -1521,17 +1545,11 @@ function ensureMetacognitiveGateSchemaInSection(section, gate) {
 
 function normalizeRunnerPacketContractCoverage(section, context = {}) {
   const type = getFieldValue(section, "type");
-  if (!["assignment", "parent-integration", "process-orchestration-skeleton", "process-runner-result"].includes(type)) {
+  if (!["assignment", WORKER_RESULT_COLLECTION_TYPE, "parent-integration", "process-orchestration-skeleton", "process-runner-result"].includes(type)) {
     return section;
   }
   if (!context?.taskId || runnerPacketUsesLegacySchema(section)) return section;
-  let next = ensureContractCoverageGateSchemaInSection(section, context);
-  const status = normalizeStatus(getFieldValue(next, "status"));
-  if (type === "parent-integration" && isCompletionStatus(status)) {
-    const missing = missingContractCoverageFields(next, contractCoverageIdsForContext(context));
-    if (missing.length) next = markPreGateCompletionUnresolved(next, type);
-  }
-  return next;
+  return ensureContractCoverageGateSchemaInSection(section, context);
 }
 
 function ensureContractCoverageGateSchemaInSection(section, context = {}) {
@@ -1633,7 +1651,7 @@ function requireAssignmentPacket(args, commandContext) {
 
 function requireIntegrationPacket(args, commandContext) {
   const packet = {
-    type: "parent-integration",
+    type: WORKER_RESULT_COLLECTION_TYPE,
     timestamp: new Date().toISOString(),
     role: requireRole(args.role),
     status: singleLine(requireArg(args.status, "--status")),
@@ -1652,16 +1670,34 @@ function requireIntegrationPacket(args, commandContext) {
     blockers: singleLine(args.blockers || "none"),
     assumptions: singleLine(args.assumptions || "none"),
     next: singleLine(args.next || "parent integrate packet"),
-    contractCoverage: singleLine(args.contractCoverage || "required"),
-    decisionCoverage: singleLine(args.decisionCoverage || "not provided"),
-    completionCoverage: singleLine(args.completionCoverage || "not provided"),
-    sourceSpecCoverage: singleLine(args.sourceSpecCoverage || "not provided"),
+    finalizationReferences: singleLine(args.finalizationReferences || "none"),
   };
   Object.assign(packet, requireIntegrationLifecycle(args));
   packet.metacognitiveGate = resolvePacketMetacognitiveGate(commandContext, packet);
   packet.metacognitiveFields = readMetacognitiveArgs(args);
   validateIntegrationMetacognitivePacket(commandContext, packet);
-  validateIntegrationContractCoveragePacket(commandContext, packet);
+  return packet;
+}
+
+function requireTaskFinalizationPacket(args, commandContext) {
+  const state = resolveWorkflowState(commandContext.targetCwd);
+  const contractCoverageContext = readWorkflowContractCoverageContext(state.stateDir);
+  const packet = {
+    type: TASK_FINALIZATION_TYPE,
+    timestamp: new Date().toISOString(),
+    status: "completed",
+    taskId: requireIdentityArg(args.taskId, "--task-id"),
+    epoch: requireIdentityArg(args.epoch, "--epoch"),
+    scope: requireIdentityArg(args.scope, "--scope"),
+    workType: commandContext.workType,
+    invocationCwd: commandContext.invocationCwd,
+    targetCwd: commandContext.targetCwd,
+    contractCoverage: singleLine(args.contractCoverage || "required"),
+    decisionCoverage: singleLine(args.decisionCoverage || "not provided"),
+    completionCoverage: singleLine(args.completionCoverage || "not provided"),
+    sourceSpecCoverage: singleLine(args.sourceSpecCoverage || "not provided"),
+    contractCoverageContext,
+  };
   return packet;
 }
 
@@ -1955,7 +1991,7 @@ ${renderMetacognitiveGatePacketSchema(packet.metacognitiveGate)}
 function renderIntegrationPacket(packet) {
   return `### ${packet.timestamp} ${packet.role} ${packet.taskId}
 
-- type: parent-integration
+- type: ${packet.type}
 - role: ${packet.role}
 - status: ${packet.status}
 - task_id: ${packet.taskId}
@@ -1971,10 +2007,11 @@ function renderIntegrationPacket(packet) {
 - blockers: ${packet.blockers}
 - assumptions: ${packet.assumptions}
 - next: ${packet.next}
+- ${FINALIZATION_REFERENCES_FIELD}: ${packet.finalizationReferences}
 - debugging_integrity: ${DEBUG_INTEGRITY}
 ${renderCodingConductFields()}
 ${renderSupervisionFields(packet)}
-${renderContractCoverageResultFields(packet)}
+${renderContractCoveragePacketSchema(packet)}
 ${renderMetacognitiveGatePacketSchema(packet.metacognitiveGate)}
 ${renderMetacognitiveResultFields(packet.metacognitiveGate, "not completed", packet.metacognitiveFields, {
   includeAll: isCompletionStatus(packet.status),
@@ -1986,6 +2023,21 @@ ${renderMetacognitiveResultFields(packet.metacognitiveGate, "not completed", pac
 - runtime_thread_disposition: ${packet.runtimeThreadDisposition}
 - runtime_changed: ${packet.runtimeChanged}
 - lifecycle: This packet records workflow-state disposition only. The workflow CLI does not interrupt, close, or reclaim runtime threads.`;
+}
+
+function renderTaskFinalizationPacket(packet) {
+  return `### ${packet.timestamp} ${TASK_FINALIZATION_TYPE} ${packet.taskId}
+
+- type: ${TASK_FINALIZATION_TYPE}
+- status: ${packet.status}
+- task_id: ${packet.taskId}
+- epoch: ${packet.epoch}
+- scope: ${packet.scope}
+- work_type: ${workTypeId(packet)}
+- invocation_cwd: ${packet.invocationCwd}
+- target_cwd: ${packet.targetCwd}
+${renderContractCoveragePacketSchema(packet)}
+${renderContractCoverageResultFields(packet)}`;
 }
 
 function renderOrchestrationSkeleton(packet) {
@@ -2036,6 +2088,7 @@ function renderRunnerResult(result) {
 - assignment: ${result.assignment}
 - expected_output: ${result.expectedOutput}
 - summary: ${result.summary || "none"}
+- ${FINALIZATION_REFERENCES_FIELD}: ${result.finalizationReferences || "none"}
 - failure: ${result.failure}
 - debugging_integrity: ${DEBUG_INTEGRITY}
 ${renderCodingConductFields()}
@@ -2054,7 +2107,7 @@ function appendRunnerEntry(commandContext, heading, entry) {
   const runnerPath = path.join(state.stateDir, RUNNER_FILE);
   const initial = `# Coding Agents Runner
 
-This file records CLI-issued assignments, parent-integration packets, process-orchestration skeletons, and process runner results.
+This file records CLI-issued assignments, worker-result collections, task-finalization packets, process-orchestration skeletons, and process runner results. Legacy parent-integration packets remain readable for backward validation.
 Collected results record workflow-state disposition only. The workflow CLI does not interrupt, close, or reclaim runtime threads.
 ${NESTED_CODING_AGENTS_PREFLIGHT}
 ${renderSupervisionFields()}
@@ -2217,7 +2270,9 @@ function validateRoleAssignments(text, workflowGate = { required: false }) {
 
 function validateRunnerPackets(text, workflowGate = { required: false }, contractCoverage = { decisionIds: [], completionIds: [] }) {
   const sections = getModernRunnerPacketSections(text);
-  const parentIntegrationSections = sections.filter((section) => getFieldValue(section, "type") === "parent-integration");
+  const workerCollectionSections = sections.filter((section) =>
+    [WORKER_RESULT_COLLECTION_TYPE, "parent-integration"].includes(getFieldValue(section, "type"))
+  );
   const invalidPackets = [];
   const invalidSupervisionPackets = [];
   const invalidCodingConductPackets = [];
@@ -2230,12 +2285,17 @@ function validateRunnerPackets(text, workflowGate = { required: false }, contrac
 
   for (const section of sections) {
     const type = getFieldValue(section, "type");
-    if (!["assignment", "parent-integration", "process-orchestration-skeleton", "process-runner-result"].includes(type)) continue;
+    if (![
+      "assignment",
+      WORKER_RESULT_COLLECTION_TYPE,
+      "parent-integration",
+      TASK_FINALIZATION_TYPE,
+      "process-orchestration-skeleton",
+      "process-runner-result",
+    ].includes(type)) continue;
     checked += 1;
-    for (const field of ["role", "task_id", "epoch", "scope"]) {
-      if (field === "role" && !getFieldValue(section, field)) {
-        invalidPackets.push(`${section.split("\n")[0].replace(/^### /, "")}.${field}`);
-      }
+    if (type !== TASK_FINALIZATION_TYPE && !getFieldValue(section, "role")) {
+      invalidPackets.push(`${section.split("\n")[0].replace(/^### /, "")}.role`);
     }
     for (const field of ["task_id", "epoch", "scope"]) {
       for (const error of validateIdentityField(section, field, section.split("\n")[0].replace(/^### /, ""))) {
@@ -2257,7 +2317,7 @@ function validateRunnerPackets(text, workflowGate = { required: false }, contrac
         }
       }
     }
-    if (type === "parent-integration") {
+    if ([WORKER_RESULT_COLLECTION_TYPE, "parent-integration"].includes(type)) {
       for (const field of ["status", "debugging_integrity", "lifecycle"]) {
         if (!getFieldValue(section, field)) {
           invalidPackets.push(`${section.split("\n")[0].replace(/^### /, "")}.${field}`);
@@ -2266,6 +2326,34 @@ function validateRunnerPackets(text, workflowGate = { required: false }, contrac
       const lifecycle = validateIntegrationLifecycleFields(section, workflowGate);
       if (lifecycle.disposition === LEGACY_LIFECYCLE_DISPOSITION) unknownLegacyLifecyclePackets += 1;
       for (const missing of lifecycle.missing) invalidLifecyclePackets.push(`${packetLabel(section)}.${missing}`);
+    }
+    if (type === TASK_FINALIZATION_TYPE) {
+      if (getFieldValue(section, "status") !== "completed") {
+        invalidPackets.push(`${packetLabel(section)}.status`);
+      }
+      const gateValidation = validateContractCoverageGateText(section);
+      for (const missing of gateValidation.missing) {
+        invalidContractCoveragePackets.push(`${packetLabel(section)}.${missing}`);
+      }
+      const declaredCoverage = finalizationContractCoverageContext(section);
+      if (!declaredCoverage.decisionIds.length) {
+        invalidContractCoveragePackets.push(`${packetLabel(section)}.contract_coverage_expected_decision_ids`);
+      }
+      if (!declaredCoverage.completionIds.length) {
+        invalidContractCoveragePackets.push(`${packetLabel(section)}.contract_coverage_expected_completion_ids`);
+      }
+      for (const mismatch of invalidContractCoverageIdNamespaces(getFieldValue(section, "task_id"), declaredCoverage)) {
+        invalidContractCoveragePackets.push(`${packetLabel(section)}.${mismatch}`);
+      }
+      if (isCurrentWorkflowPacket(section, workflowGate)) {
+        for (const missing of missingDeclaredContractCoverageIds(declaredCoverage, contractCoverage)) {
+          invalidContractCoveragePackets.push(`${packetLabel(section)}.${missing}`);
+        }
+      }
+      const coverageContext = isCurrentWorkflowPacket(section, workflowGate) ? contractCoverage : declaredCoverage;
+      for (const missing of missingContractCoverageFields(section, coverageContext)) {
+        invalidContractCoveragePackets.push(`${packetLabel(section)}.${missing}`);
+      }
     }
     if (type === "process-runner-result") {
       for (const field of ["status", "runner", "spawned", "exit_code", "summary", "failure", "debugging_integrity", "lifecycle"]) {
@@ -2276,9 +2364,9 @@ function validateRunnerPackets(text, workflowGate = { required: false }, contrac
       if (
         isCurrentWorkflowPacket(section, workflowGate)
         && isCompletionStatus(getFieldValue(section, "status"))
-        && !hasMatchingParentIntegration(section, parentIntegrationSections)
+        && !hasMatchingWorkerCollection(section, workerCollectionSections)
       ) {
-        uncollectedCompletedRunnerPackets.push(`${packetLabel(section)}.parent-integration`);
+        uncollectedCompletedRunnerPackets.push(`${packetLabel(section)}.${WORKER_RESULT_COLLECTION_TYPE}`);
       }
     }
 
@@ -2287,13 +2375,13 @@ function validateRunnerPackets(text, workflowGate = { required: false }, contrac
       for (const missing of supervision.missing) invalidSupervisionPackets.push(`${packetLabel(section)}.${missing}`);
     }
 
-    if (!runnerPacketUsesLegacySchema(section) || hasAnyCodingConductField(section)) {
+    if (type !== TASK_FINALIZATION_TYPE && (!runnerPacketUsesLegacySchema(section) || hasAnyCodingConductField(section))) {
       const conduct = validateCodingConductFields(section);
       for (const missing of conduct.missing) invalidCodingConductPackets.push(`${packetLabel(section)}.${missing}`);
     }
 
     const packetGate = runnerPacketMetacognitiveRequired(section, workflowGate);
-    if (packetGate.required) {
+    if (type !== TASK_FINALIZATION_TYPE && packetGate.required) {
       const gateValidation = validateMetacognitiveGateText(section);
       if (!gateValidation.valid) {
         invalidMetacognitivePackets.push(`${packetLabel(section)}.${gateValidation.missing.join("+")}`);
@@ -2308,15 +2396,6 @@ function validateRunnerPackets(text, workflowGate = { required: false }, contrac
         const missing = missingBlockedMetacognitiveFields(section, type);
         for (const field of missing) invalidMetacognitivePackets.push(`${packetLabel(section)}.${field}`);
       }
-    }
-    if (
-      type === "parent-integration"
-      && !runnerPacketUsesLegacySchema(section)
-      && isCurrentWorkflowPacket(section, workflowGate)
-      && isCompletionStatus(getFieldValue(section, "status"))
-    ) {
-      const missing = missingContractCoverageFields(section, contractCoverage);
-      for (const field of missing) invalidContractCoveragePackets.push(`${packetLabel(section)}.${field}`);
     }
   }
 
@@ -2350,7 +2429,10 @@ function validateRunnerPackets(text, workflowGate = { required: false }, contrac
     results.push(["warn", `missing or incomplete metacognitive runner packet fields: ${invalidMetacognitivePackets.join(", ")}`]);
   }
   if (invalidContractCoveragePackets.length) {
-    results.push(["warn", `missing or incomplete contract coverage runner packet fields: ${invalidContractCoveragePackets.join(", ")}`]);
+    results.push([
+      "warn",
+      `missing or incomplete contract coverage runner packet fields: ${invalidContractCoveragePackets.join(", ")}; accepted typed references: ${CONTRACT_COVERAGE_TYPED_REFERENCE_FORMS}`,
+    ]);
   }
   if (invalidLifecyclePackets.length) {
     results.push(["warn", `missing or invalid lifecycle runner packet fields: ${invalidLifecyclePackets.join(", ")}`]);
@@ -2358,7 +2440,7 @@ function validateRunnerPackets(text, workflowGate = { required: false }, contrac
   if (uncollectedCompletedRunnerPackets.length) {
     results.push([
       "warn",
-      `uncollected completed runner result missing follow-up parent-integration: ${uncollectedCompletedRunnerPackets.join(", ")}`,
+      `uncollected completed runner result missing follow-up worker result collection: ${uncollectedCompletedRunnerPackets.join(", ")}`,
     ]);
   }
   return { results, fatal: true };
@@ -2430,10 +2512,10 @@ function isCurrentWorkflowPacket(section, workflowGate) {
   return true;
 }
 
-function hasMatchingParentIntegration(runnerSection, parentIntegrationSections) {
-  return parentIntegrationSections.some((integrationSection) =>
-    sameRunnerIdentity(runnerSection, integrationSection)
-    && packetTimestamp(integrationSection) >= packetTimestamp(runnerSection)
+function hasMatchingWorkerCollection(runnerSection, workerCollectionSections) {
+  return workerCollectionSections.some((collectionSection) =>
+    sameRunnerIdentity(runnerSection, collectionSection)
+    && packetTimestamp(collectionSection) >= packetTimestamp(runnerSection)
   );
 }
 
@@ -2561,6 +2643,30 @@ function readWorkflowContractCoverageContext(stateDir) {
   };
 }
 
+function finalizationContractCoverageContext(section) {
+  return {
+    decisionIds: splitList(getFieldValue(section, "contract_coverage_expected_decision_ids")),
+    completionIds: splitList(getFieldValue(section, "contract_coverage_expected_completion_ids")),
+  };
+}
+
+function missingDeclaredContractCoverageIds(declared, active) {
+  const missing = [];
+  if (!sameStringSet(declared.decisionIds, active.decisionIds)) {
+    missing.push("contract_coverage_expected_decision_ids");
+  }
+  if (!sameStringSet(declared.completionIds, active.completionIds)) {
+    missing.push("contract_coverage_expected_completion_ids");
+  }
+  return missing;
+}
+
+function sameStringSet(left = [], right = []) {
+  if (left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return left.every((value) => rightSet.has(value));
+}
+
 function extractContractIds(text, prefix) {
   const ids = new Set();
   const pattern = prefix === "D" ? /^##\s+(D-\S+)/gm : /^-\s+(C-\S+?):/gm;
@@ -2654,15 +2760,14 @@ function validateIntegrationMetacognitivePacket(commandContext, packet) {
   }
 }
 
-function validateIntegrationContractCoveragePacket(commandContext, packet) {
-  const status = normalizeStatus(packet.status);
-  if (!isCompletionStatus(status)) return;
-  const state = resolveWorkflowState(commandContext.targetCwd);
-  const contractCoverage = readWorkflowContractCoverageContext(state.stateDir);
-  const missing = missingContractCoverageFields(packet, contractCoverage);
+function validateTaskFinalizationContractCoveragePacket(packet) {
+  const missing = [
+    ...invalidContractCoverageIdNamespaces(packet.taskId, packet.contractCoverageContext),
+    ...missingContractCoverageFields(packet, packet.contractCoverageContext),
+  ];
   if (missing.length) {
     throw new CliError(
-      `collect --status ${packet.status} rejected: ${CONTRACT_COVERAGE_GATE_NAME} fields missing or incomplete: ${missing.join(", ")}`,
+      `finalize rejected: ${CONTRACT_COVERAGE_GATE_NAME} fields missing or incomplete: ${missing.join(", ")}; accepted typed references: ${CONTRACT_COVERAGE_TYPED_REFERENCE_FORMS}`,
       1,
     );
   }
@@ -2676,18 +2781,33 @@ function missingContractCoverageFields(source, contractCoverage) {
   const decisionCoverage = getCoverageValue(source, "decision_coverage", "decisionCoverage");
   for (const id of contractCoverage.decisionIds || []) {
     const segment = coverageSegmentForId(decisionCoverage, id, contractCoverage.decisionIds);
-    if (!isContractCoverageSegmentEvidenceLike(segment, "decision")) missing.push(`decision_coverage.${id}`);
+    if (!hasTypedContractCoverageReference(segment)) missing.push(`decision_coverage.${id}`);
   }
 
   const completionCoverage = getCoverageValue(source, "completion_coverage", "completionCoverage");
   for (const id of contractCoverage.completionIds || []) {
     const segment = coverageSegmentForId(completionCoverage, id, contractCoverage.completionIds);
-    if (!isContractCoverageSegmentEvidenceLike(segment, "completion")) missing.push(`completion_coverage.${id}`);
+    if (!hasTypedContractCoverageReference(segment)) missing.push(`completion_coverage.${id}`);
   }
 
   const sourceSpecCoverage = getCoverageValue(source, "source_spec_coverage", "sourceSpecCoverage");
-  if (!isSourceSpecCoverageEvidenceLike(sourceSpecCoverage)) missing.push("source_spec_coverage");
+  if (!hasTypedContractCoverageReference(sourceSpecCoverage)) missing.push("source_spec_coverage");
   return missing;
+}
+
+function invalidContractCoverageIdNamespaces(taskId, contractCoverage) {
+  if (!taskId) return [];
+  const mismatches = [];
+  for (const [field, prefix, ids] of [
+    ["contract_coverage_expected_decision_ids", `D-${taskId}-`, contractCoverage?.decisionIds || []],
+    ["contract_coverage_expected_completion_ids", `C-${taskId}-`, contractCoverage?.completionIds || []],
+  ]) {
+    const invalidIds = ids.filter((id) => !String(id).startsWith(prefix));
+    if (invalidIds.length) {
+      mismatches.push(`${field} namespace mismatch (${invalidIds.join(", ")} not under ${prefix})`);
+    }
+  }
+  return mismatches;
 }
 
 function getCoverageValue(source, field, property) {
@@ -2697,45 +2817,63 @@ function getCoverageValue(source, field, property) {
 
 function coverageSegmentForId(value, id, ids) {
   const text = String(value || "");
-  const start = text.indexOf(id);
-  if (start === -1) return "";
-  let end = text.length;
-  for (const otherId of ids || []) {
-    if (otherId === id) continue;
-    const otherStart = text.indexOf(otherId, start + id.length);
-    if (otherStart !== -1 && otherStart < end) end = otherStart;
-  }
-  return text.slice(start + id.length, end).replace(/^[:=\s-]+/, "").trim();
+  const markers = contractCoverageMappingMarkers(text, [id, ...(ids || [])]);
+  const markerIndex = markers.findIndex((marker) => marker.id === id);
+  if (markerIndex === -1) return "";
+  const marker = markers[markerIndex];
+  const end = markers[markerIndex + 1]?.start ?? text.length;
+  return text.slice(marker.contentStart, end).trim();
 }
 
-function isContractCoverageSegmentEvidenceLike(value, kind) {
-  const text = String(value || "").trim();
-  if (isMetacognitiveNoEvidenceValue(text)) return false;
-  if (isGenericSelfReportOnly(normalizeEvidenceValue(text))) return false;
-  if (kind === "completion") {
-    return countEvidenceWords(text) >= 4
-      && (
-        hasVerificationEvidence(text)
-        || /\b(?:exists?|present|carr(?:y|ies)|includes?|records?|checked|verified|audit|evidence|condition|field|fields|passed|failed)\b/i.test(text)
-      );
-  }
-  return countEvidenceWords(text) >= 5
-    && hasConcreteEvidenceMarker(text)
-    && /\b(?:implement(?:ed|ation)?|verif(?:y|ied|ication)|test(?:ed|s)?|doctor|scope|cache|state|runner|assignment|handoff|audit|evidence|deferred|recorded|kept|preserved|prevented|blocked|rejected|enforced|source|file|path)\b/i.test(text);
+function contractCoverageMappingMarkers(value, ids) {
+  const text = String(value || "");
+  const exactIds = [...new Set((ids || []).map((id) => String(id)).filter(Boolean))]
+    .sort((left, right) => right.length - left.length)
+    .map(escapeRegExp);
+  if (!exactIds.length) return [];
+  const pattern = new RegExp(`(?:^|[\\s|;,()\\[\\]{}])(${exactIds.join("|")})\\s*[:=]`, "gu");
+  return [...text.matchAll(pattern)].map((match) => ({
+    id: match[1],
+    start: match.index,
+    contentStart: match.index + match[0].length,
+  }));
 }
 
-function isSourceSpecCoverageEvidenceLike(value) {
+function hasTypedContractCoverageReference(value) {
   const text = String(value || "").trim();
-  if (isMetacognitiveNoEvidenceValue(text)) return false;
-  if (/no\s+(?:source\s+)?spec(?:s)?\s+(?:in\s+)?scope/i.test(text)) {
-    return countEvidenceWords(text) >= 6
-      && /\b(?:checked|task|scope|decisions|docs|spec|source|none|not found)\b/i.test(text);
+  if (!text || isContractCoveragePlaceholder(text)) return false;
+
+  for (const match of text.matchAll(/(?:^|[\s|;,[(])(?:file|path|artifact)\s*[:=]\s*([^\s|;,\])]+)/giu)) {
+    if (isConcreteTypedReferencePayload(match[1])) return true;
   }
-  return countEvidenceWords(text) >= 5
-    && (
-      hasPathEvidence(text)
-      || /\b(?:source\s+spec|specification|spec|requirements?|accepted decisions?|completion conditions?|user request|handoff|task\.md|decisions\.md)\b/i.test(text)
-    );
+
+  for (const match of text.matchAll(/(?:^|[\s|;,[(])(?:packet|role|collected[-_]packet|collected[-_]role)\s*[:=]\s*([^\s|;,\])]+)/giu)) {
+    if (isConcreteTypedReferencePayload(match[1])) return true;
+  }
+
+  for (const match of text.matchAll(/(?:^|[\s|;,[(])command\s*[:=]\s*(.+?)\s+(?:exit(?:[-_]status)?|status)\s*[:=]\s*(-?\d+)(?=$|[\s|;,\]])/giu)) {
+    if (isConcreteTypedReferencePayload(match[1])) return true;
+  }
+
+  for (const match of text.matchAll(/(?:^|[\s|;,[(])test\s*[:=]\s*(.+?)\s+result\s*[:=]\s*(pass|fail|-?\d+)(?=$|[\s|;,\]])/giu)) {
+    if (isConcreteTypedReferencePayload(match[1])) return true;
+  }
+
+  return false;
+}
+
+function isConcreteTypedReferencePayload(value) {
+  const normalized = normalizeEvidenceValue(value).replace(/[;,]+$/g, "").trim();
+  return Boolean(normalized)
+    && !/^<[^>]+>$/u.test(normalized)
+    && !/^(?:path|ref|role|command|name|integer)$/u.test(normalized)
+    && !isContractCoveragePlaceholder(normalized);
+}
+
+function isContractCoveragePlaceholder(value) {
+  return /^(?:done|checked|ok|okay|none|not provided|not run|unknown|todo|tbd|placeholder|n\/a|na)$/iu.test(
+    normalizeEvidenceValue(value),
+  );
 }
 
 function readMetacognitiveArgs(args) {
@@ -2772,7 +2910,12 @@ function validateContractCoverageGateText(text) {
     }
   }
   const prompt = getAnyFieldValue(text, "contract_coverage_completion_prompt");
-  if (!prompt || !/Generic done\/checked\/ok self-reports are not evidence/i.test(prompt)) {
+  const typedReferencePrompt = prompt
+    && prompt.includes("file:<path>")
+    && prompt.includes("command:<command> exit:<integer>")
+    && prompt.includes("test:<name> result:<pass|fail|integer>");
+  const legacyPrompt = /Generic done\/checked\/ok self-reports are not evidence/i.test(prompt);
+  if (!typedReferencePrompt && !legacyPrompt) {
     missing.push("contract_coverage_completion_prompt");
   }
   return { valid: missing.length === 0, missing };
@@ -2942,6 +3085,7 @@ function parseFiniteIsoDurationMs(value) {
 }
 
 function runnerPacketRequiresSupervision(section) {
+  if (getFieldValue(section, "type") === TASK_FINALIZATION_TYPE) return false;
   if (runnerPacketUsesLegacySchema(section)) return hasAnySupervisionField(section);
   return true;
 }
@@ -2974,7 +3118,7 @@ function runnerPacketMetacognitiveRequired(section, workflowGate) {
 }
 
 function isCompletionPacketType(type) {
-  return type === "parent-integration" || type === "process-runner-result";
+  return [WORKER_RESULT_COLLECTION_TYPE, "parent-integration", "process-runner-result"].includes(type);
 }
 
 function normalizeStatus(status) {
@@ -3145,21 +3289,19 @@ function contractCoverageDecisionIds(context = {}) {
   return Array.from({ length: 8 }, (_, index) => `D-${context.taskId}-${String(index + 1).padStart(3, "0")}`);
 }
 
-function contractCoverageIdsForContext(context = {}) {
-  if (!context?.taskId) return { decisionIds: [], completionIds: [] };
-  return {
-    decisionIds: contractCoverageDecisionIds(context),
-    completionIds: taskCompletionConditions(context).map(({ id }) => id),
-  };
-}
-
 function renderContractCoveragePacketSchema(source = {}) {
   const taskId = source.taskId || "active-task";
+  const expectedDecisionIds = source.contractCoverageContext?.decisionIds?.length
+    ? source.contractCoverageContext.decisionIds.join(", ")
+    : `D-${taskId}-*`;
+  const expectedCompletionIds = source.contractCoverageContext?.completionIds?.length
+    ? source.contractCoverageContext.completionIds.join(", ")
+    : `C-${taskId}-*`;
   return `- contract_coverage_gate: ${CONTRACT_COVERAGE_GATE_NAME}
 - contract_coverage_required: true
 - contract_coverage_fields: ${CONTRACT_COVERAGE_FIELDS.join(", ")}
-- contract_coverage_expected_decision_ids: D-${taskId}-*
-- contract_coverage_expected_completion_ids: C-${taskId}-*
+- contract_coverage_expected_decision_ids: ${expectedDecisionIds}
+- contract_coverage_expected_completion_ids: ${expectedCompletionIds}
 - contract_coverage_completion_prompt: ${CONTRACT_COVERAGE_COMPLETION_PROMPT}`;
 }
 
@@ -3170,15 +3312,11 @@ function renderContractCoverageResultFields(packet) {
 - source_spec_coverage: ${packet.sourceSpecCoverage || "not provided"}`;
 }
 
-function renderRunnerPromptContractCoverageGate(packet) {
+function renderRunnerPromptContractCoverageGate(_packet) {
   return `
 ${CONTRACT_COVERAGE_GATE_NAME}:
-${renderContractCoveragePacketSchema(packet)}
-- A completed result must map every D-* accepted decision and C-* completion condition from ${STATE_DIR_NAME}/decisions.md and ${STATE_DIR_NAME}/task.md to implementation and verification evidence.`;
-}
-
-function renderContractCoverageReturnSections(_packet) {
-  return CONTRACT_COVERAGE_FIELDS.map((field) => `- ${field}:`).join("\n");
+- contract_coverage_owner: parent finalize
+- ${WORKER_FINALIZATION_REFERENCE_PROMPT}`;
 }
 
 function renderSupervisionSection() {
@@ -3648,7 +3786,8 @@ function printHelp() {
 Usage:
   node bin/coding-agents.mjs intake [--cwd <path>] [--target-cwd <path>] [--work-type <id>] --task <text> --task-id <id> --epoch <epoch> --scope <scope>
   node bin/coding-agents.mjs assign [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] [--hierarchy-mode none|one_level|n_level] [--max-depth <n>] [--depth <n>] [--remaining-depth <n>] [--heartbeat-interval <ISO-8601 duration>] [--heartbeat-deadline <ISO-8601 duration>] [--max-silence <ISO-8601 duration>] [--soft-timeout <ISO-8601 duration>] [--hard-timeout <ISO-8601 duration>] [--no-interrupt-until <ISO-8601 duration>] --assignment <text> --expected-output <text>
-  node bin/coding-agents.mjs collect [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] --status <status> --lifecycle-disposition state_retired|continuation_expected [--cancel-reason <allowed-reason>] [--findings <text>] [--changed-files <text>] [--verification <text>] [--blockers <text>] [--assumptions <text>] [--next <text>] [--decision-coverage <text>] [--completion-coverage <text>] [--source-spec-coverage <text>] [--expected-outcome <text>] [--actual-result <text>] [--reproduction-or-evidence <text>] [--failure-point <text>] [--hypothesis-branches <text>] [--source-of-truth-boundary <text>] [--plugin-contract-boundary <text>] [--generated-artifact-boundary <text>] [--before-context-effects <text>] [--after-context-effects <text>] [--cross-feature-consequences <text>] [--root-cause <text>] [--fix-summary <text>] [--verification-evidence <text>] [--skipped-checks <text>] [--unresolved-risks <text>] [--next-investigation <text>]
+  node bin/coding-agents.mjs collect [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] --status <status> --lifecycle-disposition state_retired|continuation_expected [--cancel-reason <allowed-reason>] [--findings <text>] [--changed-files <text>] [--verification <text>] [--blockers <text>] [--assumptions <text>] [--next <text>] [--finalization-references <typed-refs>] [--expected-outcome <text>] [--actual-result <text>] [--reproduction-or-evidence <text>] [--failure-point <text>] [--hypothesis-branches <text>] [--source-of-truth-boundary <text>] [--plugin-contract-boundary <text>] [--generated-artifact-boundary <text>] [--before-context-effects <text>] [--after-context-effects <text>] [--cross-feature-consequences <text>] [--root-cause <text>] [--fix-summary <text>] [--verification-evidence <text>] [--skipped-checks <text>] [--unresolved-risks <text>] [--next-investigation <text>]
+  node bin/coding-agents.mjs finalize [--cwd <path>] [--target-cwd <path>] --task-id <id> --epoch <epoch> --scope <scope> [--work-type <id>] [--contract-coverage required] --decision-coverage <text> --completion-coverage <text> --source-spec-coverage <text>
   node bin/coding-agents.mjs run|orchestrate [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] [--hierarchy-mode none|one_level|n_level] [--max-depth <n>] [--depth <n>] [--remaining-depth <n>] [--heartbeat-interval <ISO-8601 duration>] [--heartbeat-deadline <ISO-8601 duration>] [--max-silence <ISO-8601 duration>] [--soft-timeout <ISO-8601 duration>] [--hard-timeout <ISO-8601 duration>] [--no-interrupt-until <ISO-8601 duration>] --assignment <text> --expected-output <text> [--runner codex-cli] [--timeout-ms <ms>]
   node bin/coding-agents.mjs verify-assignments [--cwd <path>] [--target-cwd <path>]
   node bin/coding-agents.mjs normalize-debugging-integrity [--cwd <path>] [--target-cwd <path>] [--execute]
@@ -3659,7 +3798,8 @@ Usage:
 Commands:
   intake   Create or update target .coding-agents workflow files.
   assign   Record a scoped specialist assignment in .coding-agents/runner.md.
-  collect  Record a parent-integration packet and its workflow-state-only lifecycle disposition. state_retired requires exactly one allowed --cancel-reason; continuation_expected rejects --cancel-reason.
+  collect  Record a worker-result-collection packet and its workflow-state-only lifecycle disposition. Completed collection does not require task-wide D/C/source-spec coverage. state_retired requires exactly one allowed --cancel-reason; continuation_expected rejects --cancel-reason.
+  finalize Validate complete active D/C/source-spec coverage and record a distinct task-finalization packet. Every ID segment and source_spec_coverage requires one accepted typed reference.
   run/orchestrate
            Record an assignment and orchestration skeleton by default; with --runner codex-cli, spawn codex exec and record normalized results.
   verify-assignments
@@ -3678,7 +3818,7 @@ State:
   Existing docs/codex directories are migration input or hints only; they are never operational state fallback or write targets.
   State writes add .coding-agents/ to .git/info/exclude; .gitignore is not edited.
   Generated assignments, handoff prompts, and runner packets carry workflow-state lifecycle, supervision, coding conduct, and debugging integrity rules.
-  Current task state and modern parent-integration packets record lifecycle_contract_version=${LIFECYCLE_CONTRACT_VERSION}. Modern packets also record lifecycle_scope=workflow_state_only, lifecycle_disposition, cancel_reason, runtime_thread_disposition=unmanaged_by_workflow_cli, and runtime_changed=false.
+  Current task state and modern worker-result-collection packets record lifecycle_contract_version=${LIFECYCLE_CONTRACT_VERSION}. Modern collection packets also record lifecycle_scope=workflow_state_only, lifecycle_disposition, cancel_reason, runtime_thread_disposition=unmanaged_by_workflow_cli, and runtime_changed=false.
   Fieldless current packets are invalid. unknown_legacy is accepted only for pre-contract workflow state or non-current packets that predate the recorded lifecycle contract activation time; validation does not synthesize retirement.
   --runtime-thread-closed is rejected globally for every command. The workflow CLI never emits or accepts runtime_thread_closed=true. Interruption and process exit are not runtime-thread closure evidence.
   Parent-managed child-worker prompts also suppress nested Coding Agents preflight; child workers do not ask \`coding-agents を使いますか？ [Y/n]\` or start independent nested Coding Agents workflows inside an assigned task_id/epoch/scope. Descendant delegation is allowed only when finite hierarchy fields grant remaining_depth > 0 and inherited supervision is preserved.
@@ -3694,8 +3834,8 @@ State:
   Legacy runner scopes remain available only for simple path-only values such as "README.md", "allowed/", "bin/coding-agents.mjs tests/workflow-state.test.mjs", ".", "repo", and "whole repo".
   ${CODING_CONDUCT_GATE_NAME}: ${CODING_CONDUCT_CONTRACT}
   Debug or repair work must identify root cause and verify the intended outcome; log-only, fallback-only, skip-only, failure-output-only, or return-to-main-loop-only changes are not completion.
-  Gate-required source-change/debug/repair/source-of-truth/plugin-contract/generated-artifact inconsistency work also carries ${METACOGNITIVE_GATE_NAME} fields and rejects completed collection without them.
-  Completed parent-integration packets also carry ${CONTRACT_COVERAGE_GATE_NAME}: every D-* accepted decision and C-* completion condition must be mapped to concrete implementation and verification evidence.
+  Gate-required source-change/debug/repair/source-of-truth/plugin-contract/generated-artifact inconsistency work also carries ${METACOGNITIVE_GATE_NAME} fields and rejects completed worker collection without them.
+  ${CONTRACT_COVERAGE_GATE_NAME} is enforced by finalize, not collect. Accepted typed references: ${CONTRACT_COVERAGE_TYPED_REFERENCE_FORMS}. Placeholder-only done/checked/ok values are rejected.
 `);
 }
 

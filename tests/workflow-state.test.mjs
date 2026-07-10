@@ -21,14 +21,14 @@ function contractCoverageArgs(taskId) {
     "required",
     "--decision-coverage",
     decisions
-      .map((id) => `${id}: verified in .coding-agents decisions.md, runner.md, and node bin/coding-agents.mjs verify-assignments output for ${id}`)
+      .map((id) => `${id}: 日本語の確認 path:.coding-agents/decisions.md`)
       .join(" | "),
     "--completion-coverage",
     completions
-      .map((id) => `${id}: verified by .coding-agents task.md, assignments.md, runner.md fields, and doctor output for ${id}`)
+      .map((id) => `${id}: 日本語の確認 test:workflow-state result:pass`)
       .join(" | "),
     "--source-spec-coverage",
-    "no source specs in scope: checked task.md decisions.md and documentation scope before collection",
+    "仕様範囲を確認 path:.coding-agents/task.md",
   ];
 }
 
@@ -56,6 +56,21 @@ test("runner commands require matching intake state before writing runner state"
     assert.match(beforeIntake.stderr, /requires current intake state/);
     assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
 
+    const finalizeBeforeIntake = runCli([
+      "finalize",
+      "--target-cwd",
+      repo,
+      "--task-id",
+      "state-safety",
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+    ]);
+    assert.notEqual(finalizeBeforeIntake.status, 0);
+    assert.match(finalizeBeforeIntake.stderr, /finalize requires current intake state/);
+    assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
+
     intake(repo, { taskId: "state-safety", epoch: "e1", scope: "README.md" });
 
     const wrongTask = runCli([
@@ -79,6 +94,21 @@ test("runner commands require matching intake state before writing runner state"
     assert.match(wrongTask.stderr, /does not match current task state-safety/);
     assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
 
+    const wrongFinalizationTask = runCli([
+      "finalize",
+      "--target-cwd",
+      repo,
+      "--task-id",
+      "wrong-task",
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+    ]);
+    assert.notEqual(wrongFinalizationTask.status, 0);
+    assert.match(wrongFinalizationTask.stderr, /does not match current task state-safety/);
+    assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
+
     const assigned = runCli([
       "assign",
       "--target-cwd",
@@ -98,6 +128,197 @@ test("runner commands require matching intake state before writing runner state"
     ]);
     assert.equal(assigned.status, 0, assigned.stderr);
     assert.match(readState(repo, "runner.md"), /type: assignment/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("finalize requires exact delimiter-aware coverage IDs while preserving colon and equals mappings", () => {
+  const repo = makeTempGitRepo();
+  try {
+    const taskId = "coverage-boundary";
+    const decisionIds = Array.from({ length: 8 }, (_, index) => `D-${taskId}-${String(index + 1).padStart(3, "0")}`);
+    const completionIds = Array.from({ length: 10 }, (_, index) => `C-${taskId}-${String(index + 1).padStart(3, "0")}`);
+    intake(repo, { taskId, epoch: "e1", scope: "README.md", workType: "documentation" });
+
+    const suffixedFake = runCli([
+      "finalize",
+      "--target-cwd",
+      repo,
+      "--task-id",
+      taskId,
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+      "--work-type",
+      "documentation",
+      "--contract-coverage",
+      "required",
+      "--decision-coverage",
+      decisionIds
+        .map((id, index) => `${index === decisionIds.length - 1 ? `${id}-extra` : id}: path:.coding-agents/decisions.md`)
+        .join(" | "),
+      "--completion-coverage",
+      completionIds.map((id) => `${id}: test:workflow-state result:pass`).join(" | "),
+      "--source-spec-coverage",
+      "path:.coding-agents/task.md",
+    ]);
+    assert.notEqual(suffixedFake.status, 0);
+    assert.match(suffixedFake.stderr, /decision_coverage\.D-coverage-boundary-008/);
+    assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false, "rejected finalize must be atomic");
+
+    const exactMappings = runCli([
+      "finalize",
+      "--target-cwd",
+      repo,
+      "--task-id",
+      taskId,
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+      "--work-type",
+      "documentation",
+      "--contract-coverage",
+      "required",
+      "--decision-coverage",
+      decisionIds
+        .map((id, index) => `${id}${index % 2 === 0 ? ":" : " ="} path:.coding-agents/decisions.md`)
+        .join(" | "),
+      "--completion-coverage",
+      completionIds
+        .map((id, index) => `${id}${index % 2 === 0 ? ":" : " ="} test:workflow-state result:${["pass", "fail", "7"][index % 3]}`)
+        .join(" | "),
+      "--source-spec-coverage",
+      "test:source-spec result:0",
+    ]);
+    assert.equal(exactMappings.status, 0, exactMappings.stderr);
+    assert.match(readState(repo, "runner.md"), /type: task-finalization/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("finalize keeps prefix-collision coverage IDs independently required", () => {
+  const repo = makeTempGitRepo();
+  try {
+    const taskId = "prefix";
+    const generatedDecisionIds = Array.from({ length: 8 }, (_, index) => `D-${taskId}-${String(index + 1).padStart(3, "0")}`);
+    const completionIds = Array.from({ length: 10 }, (_, index) => `C-${taskId}-${String(index + 1).padStart(3, "0")}`);
+    intake(repo, { taskId, epoch: "e1", scope: "README.md", workType: "documentation" });
+
+    const decisionsPath = path.join(repo, ".coding-agents", "decisions.md");
+    writeFileSync(
+      decisionsPath,
+      `${readFileSync(decisionsPath, "utf8")}\n## D-prefix-1 Prefix Boundary\n\n- accepted: D-prefix-1 remains independently required.\n\n## D-prefix-10 Prefix Boundary\n\n- accepted: D-prefix-10 remains independently required.\n`,
+      "utf8",
+    );
+
+    const rejected = runCli([
+      "finalize",
+      "--target-cwd",
+      repo,
+      "--task-id",
+      taskId,
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+      "--work-type",
+      "documentation",
+      "--contract-coverage",
+      "required",
+      "--decision-coverage",
+      [...generatedDecisionIds, "D-prefix-10"].map((id) => `${id}: path:.coding-agents/decisions.md`).join(" | "),
+      "--completion-coverage",
+      completionIds.map((id) => `${id}: test:workflow-state result:pass`).join(" | "),
+      "--source-spec-coverage",
+      "path:.coding-agents/task.md",
+    ]);
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stderr, /decision_coverage\.D-prefix-1(?:\b|$)/);
+    assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false, "prefix rejection must be atomic");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("finalize rejects skip and skipped test results as typed completion evidence atomically", () => {
+  for (const resultValue of ["skip", "skipped"]) {
+    const repo = makeTempGitRepo();
+    try {
+      const taskId = `typed-${resultValue}`;
+      const decisionIds = Array.from({ length: 8 }, (_, index) => `D-${taskId}-${String(index + 1).padStart(3, "0")}`);
+      const completionIds = Array.from({ length: 10 }, (_, index) => `C-${taskId}-${String(index + 1).padStart(3, "0")}`);
+      intake(repo, { taskId, epoch: "e1", scope: "README.md", workType: "documentation" });
+
+      const rejected = runCli([
+        "finalize",
+        "--target-cwd",
+        repo,
+        "--task-id",
+        taskId,
+        "--epoch",
+        "e1",
+        "--scope",
+        "README.md",
+        "--work-type",
+        "documentation",
+        "--contract-coverage",
+        "required",
+        "--decision-coverage",
+        decisionIds.map((id) => `${id}: test:decision-boundary result:${resultValue}`).join(" | "),
+        "--completion-coverage",
+        completionIds.map((id) => `${id}: test:completion-boundary result:${resultValue}`).join(" | "),
+        "--source-spec-coverage",
+        `test:source-spec-boundary result:${resultValue}`,
+      ]);
+      assert.notEqual(rejected.status, 0, `result:${resultValue} unexpectedly finalized the task`);
+      assert.match(rejected.stderr, new RegExp(`decision_coverage\\.D-${taskId}-001`));
+      assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false, "rejected typed evidence must be atomic");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  }
+});
+
+test("task-finalization validation binds D and C namespaces to packet task_id", () => {
+  const repo = makeTempGitRepo();
+  try {
+    const taskId = "namespace-ident";
+    intake(repo, { taskId, epoch: "e1", scope: "README.md", workType: "documentation" });
+    const finalized = runCli([
+      "finalize",
+      "--target-cwd",
+      repo,
+      "--task-id",
+      taskId,
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+      "--work-type",
+      "documentation",
+      ...contractCoverageArgs(taskId),
+    ]);
+    assert.equal(finalized.status, 0, finalized.stderr);
+
+    const runnerPath = path.join(repo, ".coding-agents", "runner.md");
+    const validRunner = readFileSync(runnerPath, "utf8");
+    assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
+    assert.equal(runCli(["doctor", "--target-cwd", repo]).status, 0);
+
+    const tamperedRunner = validRunner.replace(`- task_id: ${taskId}`, "- task_id: other");
+    assert.notEqual(tamperedRunner, validRunner);
+    writeFileSync(runnerPath, tamperedRunner, "utf8");
+
+    const verifyTampered = runCli(["verify-assignments", "--target-cwd", repo]);
+    assert.notEqual(verifyTampered.status, 0);
+    assert.match(verifyTampered.stdout, /task-finalization.*contract_coverage_expected_(?:decision|completion)_ids.*namespace/);
+    const doctorTampered = runCli(["doctor", "--target-cwd", repo]);
+    assert.notEqual(doctorTampered.status, 0);
+    assert.match(doctorTampered.stdout, /task-finalization.*namespace/);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -517,7 +738,7 @@ test("collect records workflow-state lifecycle without claiming runtime-thread c
 
     const runnerPath = path.join(repo, ".coding-agents", "runner.md");
     const validRunner = readFileSync(runnerPath, "utf8");
-    assert.match(validRunner, /type: parent-integration[\s\S]*lifecycle_scope: workflow_state_only/);
+    assert.match(validRunner, /type: worker-result-collection[\s\S]*lifecycle_scope: workflow_state_only/);
     assert.match(validRunner, /lifecycle_contract_version: workflow_state_v1/);
     assert.match(validRunner, /lifecycle_disposition: state_retired\n- cancel_reason: blocker_or_failure/);
     assert.match(validRunner, /lifecycle_disposition: continuation_expected\n- cancel_reason: none/);
@@ -560,6 +781,8 @@ test("collect records workflow-state lifecycle without claiming runtime-thread c
     const help = runCli(["--help"]);
     assert.equal(help.status, 0, help.stderr);
     assert.match(help.stdout, /--lifecycle-disposition state_retired\|continuation_expected/);
+    assert.match(help.stdout, /coding-agents\.mjs finalize/);
+    assert.match(help.stdout, /Accepted typed references: file:<path>.*command:<command> exit:<integer>.*test:<name> result:<pass\|fail\|integer>/);
     assert.match(help.stdout, /workflow CLI never emits or accepts runtime_thread_closed=true/);
   } finally {
     rmSync(repo, { recursive: true, force: true });
@@ -573,6 +796,7 @@ test("runtime-thread closure flags are rejected at the global command boundary",
       "intake",
       "assign",
       "collect",
+      "finalize",
       "run",
       "orchestrate",
       "verify-assignments",
@@ -839,10 +1063,10 @@ test("valid feature profile renders in assignment, collect, and run skeleton pac
 
     const runner = readState(repo, "runner.md");
     assert.match(runner, /type: assignment[\s\S]*feature_profile: debug\.reproducer/);
-    assert.match(runner, /type: parent-integration[\s\S]*feature_profile: debug\.reproducer/);
+    assert.match(runner, /type: worker-result-collection[\s\S]*feature_profile: debug\.reproducer/);
     assert.match(runner, /type: process-orchestration-skeleton[\s\S]*feature_profile: debug\.reproducer/);
     assert.match(runner, /type: assignment[\s\S]*feature_profile: debug\.reproducer\n- work_type: auto/);
-    assert.match(runner, /type: parent-integration[\s\S]*feature_profile: debug\.reproducer\n- work_type: auto/);
+    assert.match(runner, /type: worker-result-collection[\s\S]*feature_profile: debug\.reproducer\n- work_type: auto/);
     assert.match(runner, /type: process-orchestration-skeleton[\s\S]*feature_profile: debug\.reproducer\n- work_type: auto/);
     assert.match(runner, /feature_profile_guidance: .*reproduce the expected versus actual behavior/);
     assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
@@ -874,6 +1098,9 @@ if (!prompt.includes("missed heartbeat -> soft ping/status request -> grace wait
 if (!prompt.includes("hierarchy_mode: none")) process.exit(12);
 if (!prompt.includes("heartbeat_interval: PT15M")) process.exit(13);
 if (!prompt.includes("cancel_reason_required: true")) process.exit(14);
+if (!prompt.includes("Return concise typed references relevant to this worker result for parent finalization")) process.exit(20);
+if (!prompt.includes("- finalization_references:")) process.exit(21);
+if (prompt.includes("A completed result must map every D-* accepted decision")) process.exit(22);
 const outputIndex = args.indexOf("--output-last-message");
 if (outputIndex !== -1) writeFileSync(args[outputIndex + 1], "runner prompt included feature_profile: runner.scope-guard and supervision\\n", "utf8");
 process.stdout.write("fake codex completed\\n");
@@ -922,7 +1149,7 @@ process.stdout.write("fake codex completed\\n");
   }
 });
 
-test("verify rejects completed codex-cli runner results until parent integration is collected", () => {
+test("verify rejects completed codex-cli runner results until worker result is collected", () => {
   const repo = makeTempGitRepo();
   const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
   try {
@@ -966,7 +1193,7 @@ test("verify rejects completed codex-cli runner results until parent integration
 
     const uncollected = runCli(["verify-assignments", "--target-cwd", repo]);
     assert.notEqual(uncollected.status, 0);
-    assert.match(uncollected.stdout, /uncollected completed runner result missing follow-up parent-integration/);
+    assert.match(uncollected.stdout, /uncollected completed runner result missing follow-up worker result collection/);
 
     const collect = runCli([
       "collect",
@@ -999,7 +1226,7 @@ test("verify rejects completed codex-cli runner results until parent integration
     assert.equal(collect.status, 0, collect.stderr);
 
     runner = readState(repo, "runner.md");
-    assert.match(runner, /type: parent-integration[\s\S]*status: completed/);
+    assert.match(runner, /type: worker-result-collection[\s\S]*status: completed/);
     assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
     assert.equal(runCli(["doctor", "--target-cwd", repo]).status, 0);
   } finally {
