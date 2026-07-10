@@ -36,14 +36,27 @@ Items 1-9 are Coding Agents self changes. Item 10 is external legacy cleanup.
      packet, or process-result activity actually occurs.
    - Do not require `runner.md` for unrelated intake/spec/documentation flows.
 
-4. Subagent lifecycle closure
+4. Subagent workflow-state lifecycle
    - Subagents must return concise parent-integration material and must not stay
      open waiting for more work after returning it.
-   - The parent is responsible for promptly closing or retiring no-longer-needed
-     subagents after completed result integration, hard-timeout/failure/blocker
-     handling, stale premise or scope change, and before final report when no
-     further use is expected, without overriding the supervision and
-     cancellation rules.
+   - `collect` requires `--lifecycle-disposition state_retired` or
+     `--lifecycle-disposition continuation_expected`. `state_retired` requires
+     exactly one allowed `--cancel-reason`; `continuation_expected` rejects a
+     cancel reason and records `cancel_reason: none`.
+   - Current task state records `lifecycle_contract_version: workflow_state_v1`
+     and `lifecycle_contract_effective_at`. New parent-integration packets
+     record the same lifecycle contract version,
+     `lifecycle_scope: workflow_state_only`, the selected
+     `lifecycle_disposition`, `cancel_reason`,
+     `runtime_thread_disposition: unmanaged_by_workflow_cli`, and
+     `runtime_changed: false`.
+   - These fields describe workflow state only. The CLI must not emit or accept
+     `runtime_thread_closed: true`, and interruption or process exit is not
+     runtime-thread closure evidence.
+   - Fieldless current packets are invalid. Pre-contract workflow state and
+     non-current packets that predate the recorded activation time remain
+     `unknown_legacy`; normalization and validation must not synthesize a
+     retirement decision for them.
    - Generated assignments, runner prompts, runner packets, and handoff material
      must carry this lifecycle rule so future job state preserves it.
 
@@ -66,15 +79,14 @@ Items 1-9 are Coding Agents self changes. Item 10 is external legacy cleanup.
      `soft_timeout`, `hard_timeout`, `no_interrupt_until`, and
      `cancel_reason_required: true`.
    - Silence before `heartbeat_deadline` or `no_interrupt_until` is neutral and
-     must not trigger cancellation, interruption, retirement, replacement, or
-     reassignment by itself.
+     must not trigger cancellation, interruption, workflow `state_retired`,
+     replacement, or reassignment by itself.
    - Heartbeats and progress reports are telemetry only. They are not completion
      evidence, verification evidence, root-cause evidence, or permission to
      broaden scope.
-   - Cancellation, interruption, retirement, or replacement must record exactly
-     one allowed reason: `completed_retire`, `user_stop`, `safety_stop`,
-     `scope_violation`, `stale_timeout`, `blocker_or_failure`, or
-     `stale_premise`.
+   - A `state_retired` workflow disposition must record exactly one allowed
+     reason: `completed_retire`, `user_stop`, `safety_stop`, `scope_violation`,
+     `stale_timeout`, `blocker_or_failure`, or `stale_premise`.
    - Cancellation for quiet staleness must follow this path: missed heartbeat,
      soft ping or status request, grace wait, stale mark, then cancel or replace
      only if the worker remains silent, returns invalid status, violates scope,
@@ -197,7 +209,8 @@ Future implementation work should preserve this split:
   when `--target-cwd` or an explicit target points elsewhere.
 - Generated job state must preserve nested Coding Agents preflight suppression,
   finite delegation depth, subagent supervision and cancellation rules,
-  subagent lifecycle closure, concise integration-output rules, the Coding
+  workflow-state lifecycle disposition without runtime-thread closure claims,
+  concise integration-output rules, the Coding
   Conduct Gate, debug root-cause completion requirements, and metacognitive
   context-impact checks for gate-required work.
 - Stale generated state must be normalized explicitly before verification is

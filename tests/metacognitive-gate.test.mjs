@@ -8,6 +8,13 @@ import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CLI = path.join(REPO_ROOT, "bin", "coding-agents.mjs");
+const RETIRED_LIFECYCLE_ARGS = [
+  "--lifecycle-disposition",
+  "state_retired",
+  "--cancel-reason",
+  "completed_retire",
+];
+const CONTINUATION_LIFECYCLE_ARGS = ["--lifecycle-disposition", "continuation_expected"];
 
 const META_ARGS = [
   "--expected-outcome",
@@ -727,6 +734,7 @@ test("completion status synonyms cannot bypass gate-required completion validati
       assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
     }
 
+    markWorkflowLifecyclePreContract(repo);
     writeFileSync(path.join(repo, ".coding-agents", "runner.md"), completionSynonymRunner("meta-completion-synonyms", "success"), "utf8");
     const verify = runCli(["verify-assignments", "--target-cwd", repo]);
     assert.notEqual(verify.status, 0);
@@ -903,6 +911,7 @@ test("normalization recovers stale pre-gate state without faking completed evide
   const repo = makeTempGitRepo();
   try {
     intakeGateRequired(repo, "meta-stale");
+    markWorkflowLifecyclePreContract(repo);
     const assignmentsPath = path.join(repo, ".coding-agents", "assignments.md");
     const staleAssignments = stripMetacognitiveLines(readFileSync(assignmentsPath, "utf8"));
     writeFileSync(assignmentsPath, staleAssignments, "utf8");
@@ -1207,7 +1216,8 @@ function makeTempGitRepo() {
 }
 
 function runCli(args, options = {}) {
-  return spawnSync(process.execPath, [CLI, ...args], {
+  const commandArgs = withCollectLifecycle(args);
+  return spawnSync(process.execPath, [CLI, ...commandArgs], {
     cwd: options.cwd || REPO_ROOT,
     env: options.env || process.env,
     encoding: "utf8",
@@ -1215,8 +1225,26 @@ function runCli(args, options = {}) {
   });
 }
 
+function withCollectLifecycle(args) {
+  if (args[0] !== "collect" || args.includes("--lifecycle-disposition")) return args;
+  const statusIndex = args.indexOf("--status");
+  const lifecycleArgs = statusIndex !== -1 && args[statusIndex + 1] === "blocked"
+    ? CONTINUATION_LIFECYCLE_ARGS
+    : RETIRED_LIFECYCLE_ARGS;
+  return [...args, ...lifecycleArgs];
+}
+
 function readState(repo, file) {
   return readFileSync(path.join(repo, ".coding-agents", file), "utf8");
+}
+
+function markWorkflowLifecyclePreContract(repo) {
+  const taskPath = path.join(repo, ".coding-agents", "task.md");
+  const preContract = readFileSync(taskPath, "utf8")
+    .split(/\r?\n/)
+    .filter((line) => !/^- lifecycle_contract_(?:version|effective_at):/.test(line))
+    .join("\n");
+  writeFileSync(taskPath, preContract, "utf8");
 }
 
 function withoutMetaArgs(...omittedFlags) {

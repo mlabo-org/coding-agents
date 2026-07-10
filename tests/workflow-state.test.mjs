@@ -383,7 +383,7 @@ test("intake generates supervision guidance in assignments and handoff", () => {
 
     const handoff = readState(repo, "handoff.md");
     assert.match(handoff, /^Supervision:$/m);
-    assert.match(handoff, /Parent must not cancel, interrupt, retire, or replace a quiet worker during the no-interrupt window/);
+    assert.match(handoff, /Parent must not cancel or interrupt a quiet worker, mark its workflow state_retired, or replace it during the no-interrupt window/);
     assert.match(handoff, /Explicit completed, blocked, or failed results are not silence; collect and integrate them immediately/);
     assert.match(handoff, SELF_REPORT_GUIDANCE);
     assert.match(handoff, /^- hierarchy_mode: none$/m);
@@ -393,6 +393,202 @@ test("intake generates supervision guidance in assignments and handoff", () => {
     assert.match(handoff, CODING_CONDUCT_RULES);
     assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
     assert.equal(runCli(["doctor", "--target-cwd", repo]).status, 0);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("collect records workflow-state lifecycle without claiming runtime-thread closure", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, {
+      task: "Record workflow-only lifecycle disposition",
+      taskId: "lifecycle-collect",
+      epoch: "e1",
+      scope: "README.md",
+      workType: "documentation",
+    });
+    const taskState = readState(repo, "task.md");
+    assert.match(taskState, /lifecycle_contract_version: workflow_state_v1/);
+    assert.match(taskState, /lifecycle_contract_effective_at: \d{4}-\d{2}-\d{2}T/);
+    const base = [
+      "collect",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "lifecycle-collect",
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+      "--work-type",
+      "documentation",
+      "--status",
+      "blocked",
+      "--blockers",
+      "fixture unavailable",
+      "--next",
+      "parent decides whether to continue",
+    ];
+
+    const missingDisposition = runCli(base);
+    assert.notEqual(missingDisposition.status, 0);
+    assert.match(missingDisposition.stderr, /--lifecycle-disposition/);
+    assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
+
+    const missingReason = runCli([...base, "--lifecycle-disposition", "state_retired"]);
+    assert.notEqual(missingReason.status, 0);
+    assert.match(missingReason.stderr, /--cancel-reason/);
+
+    const unknownDisposition = runCli([...base, "--lifecycle-disposition", "runtime_closed"]);
+    assert.notEqual(unknownDisposition.status, 0);
+    assert.match(unknownDisposition.stderr, /unknown lifecycle disposition: runtime_closed/);
+
+    const multipleReasons = runCli([
+      ...base,
+      "--lifecycle-disposition",
+      "state_retired",
+      "--cancel-reason",
+      "completed_retire,user_stop",
+    ]);
+    assert.notEqual(multipleReasons.status, 0);
+    assert.match(multipleReasons.stderr, /exactly one allowed --cancel-reason/);
+
+    const duplicateReasonFlags = runCli([
+      ...base,
+      "--lifecycle-disposition",
+      "state_retired",
+      "--cancel-reason",
+      "completed_retire",
+      "--cancel-reason",
+      "user_stop",
+    ]);
+    assert.notEqual(duplicateReasonFlags.status, 0);
+    assert.match(duplicateReasonFlags.stderr, /duplicate --cancel-reason/);
+
+    const continuationWithReason = runCli([
+      ...base,
+      "--lifecycle-disposition",
+      "continuation_expected",
+      "--cancel-reason",
+      "completed_retire",
+    ]);
+    assert.notEqual(continuationWithReason.status, 0);
+    assert.match(continuationWithReason.stderr, /continuation_expected rejects --cancel-reason/);
+
+    const runtimeCloseClaim = runCli([
+      ...base,
+      "--lifecycle-disposition",
+      "state_retired",
+      "--cancel-reason",
+      "blocker_or_failure",
+      "--runtime-thread-closed",
+      "true",
+    ]);
+    assert.notEqual(runtimeCloseClaim.status, 0);
+    assert.match(runtimeCloseClaim.stderr, /--runtime-thread-closed is unsupported/);
+
+    const retired = runCli([
+      ...base,
+      "--lifecycle-disposition",
+      "state_retired",
+      "--cancel-reason",
+      "blocker_or_failure",
+    ]);
+    assert.equal(retired.status, 0, retired.stderr);
+    assert.match(retired.stdout, /ok lifecycle_scope: workflow_state_only/);
+    assert.match(retired.stdout, /ok lifecycle_disposition: state_retired/);
+    assert.match(retired.stdout, /ok cancel_reason: blocker_or_failure/);
+    assert.match(retired.stdout, /ok runtime_thread_disposition: unmanaged_by_workflow_cli/);
+    assert.match(retired.stdout, /ok runtime_changed: false/);
+
+    const continuation = runCli([
+      ...base,
+      "--role",
+      "Reviewer",
+      "--lifecycle-disposition",
+      "continuation_expected",
+    ]);
+    assert.equal(continuation.status, 0, continuation.stderr);
+    assert.match(continuation.stdout, /ok lifecycle_disposition: continuation_expected/);
+    assert.match(continuation.stdout, /ok cancel_reason: none/);
+
+    const runnerPath = path.join(repo, ".coding-agents", "runner.md");
+    const validRunner = readFileSync(runnerPath, "utf8");
+    assert.match(validRunner, /type: parent-integration[\s\S]*lifecycle_scope: workflow_state_only/);
+    assert.match(validRunner, /lifecycle_contract_version: workflow_state_v1/);
+    assert.match(validRunner, /lifecycle_disposition: state_retired\n- cancel_reason: blocker_or_failure/);
+    assert.match(validRunner, /lifecycle_disposition: continuation_expected\n- cancel_reason: none/);
+    assert.match(validRunner, /runtime_thread_disposition: unmanaged_by_workflow_cli\n- runtime_changed: false/);
+    assert.doesNotMatch(validRunner, /runtime_thread_closed:/);
+    assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
+
+    const fieldlessCurrent = validRunner
+      .split(/\r?\n/)
+      .filter((line) => !/^- (?:lifecycle_contract_version|lifecycle_scope|lifecycle_disposition|cancel_reason|runtime_thread_disposition|runtime_changed):/.test(line))
+      .join("\n");
+    writeFileSync(runnerPath, fieldlessCurrent, "utf8");
+    const fieldlessCurrentResult = runCli(["verify-assignments", "--target-cwd", repo]);
+    assert.notEqual(fieldlessCurrentResult.status, 0);
+    assert.match(fieldlessCurrentResult.stdout, /missing or invalid lifecycle runner packet fields: .*lifecycle_contract_version/);
+
+    writeFileSync(
+      runnerPath,
+      validRunner.replace("- lifecycle_contract_version: workflow_state_v1", "- lifecycle_contract_version: forged_version"),
+      "utf8",
+    );
+    const forgedVersion = runCli(["verify-assignments", "--target-cwd", repo]);
+    assert.notEqual(forgedVersion.status, 0);
+    assert.match(forgedVersion.stdout, /missing or invalid lifecycle runner packet fields: .*lifecycle_contract_version/);
+
+    writeFileSync(runnerPath, validRunner.replace("- runtime_changed: false", "- runtime_changed: true"), "utf8");
+    const changedRuntime = runCli(["verify-assignments", "--target-cwd", repo]);
+    assert.notEqual(changedRuntime.status, 0);
+    assert.match(changedRuntime.stdout, /missing or invalid lifecycle runner packet fields: .*runtime_changed/);
+
+    writeFileSync(
+      runnerPath,
+      validRunner.replace("- runtime_changed: false", "- runtime_changed: false\n- runtime_thread_closed: true"),
+      "utf8",
+    );
+    const forgedClosure = runCli(["verify-assignments", "--target-cwd", repo]);
+    assert.notEqual(forgedClosure.status, 0);
+    assert.match(forgedClosure.stdout, /runtime_thread_closed unsupported/);
+
+    const help = runCli(["--help"]);
+    assert.equal(help.status, 0, help.stderr);
+    assert.match(help.stdout, /--lifecycle-disposition state_retired\|continuation_expected/);
+    assert.match(help.stdout, /workflow CLI never emits or accepts runtime_thread_closed=true/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("runtime-thread closure flags are rejected at the global command boundary", () => {
+  const repo = makeTempGitRepo();
+  try {
+    const commands = [
+      "intake",
+      "assign",
+      "collect",
+      "run",
+      "orchestrate",
+      "verify-assignments",
+      "normalize-debugging-integrity",
+      "handoff",
+      "doctor",
+    ];
+    for (const command of commands) {
+      const rejected = runCli([command, "--target-cwd", repo, "--runtime-thread-closed", "true"]);
+      assert.notEqual(rejected.status, 0, `${command} unexpectedly accepted runtime-thread closure`);
+      assert.match(rejected.stderr, /--runtime-thread-closed is unsupported by every command/);
+    }
+    const rejectedHelp = runCli(["--help", "--runtime-thread-closed", "true"]);
+    assert.notEqual(rejectedHelp.status, 0);
+    assert.match(rejectedHelp.stderr, /--runtime-thread-closed is unsupported by every command/);
+    assert.equal(existsSync(path.join(repo, ".coding-agents")), false);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -465,7 +661,7 @@ test("runner assignment packets carry supervision guidance", () => {
     const runner = readState(repo, "runner.md");
     assert.match(runner, /type: assignment[\s\S]*supervision_contract: Subagent Supervision Contract/);
     assert.match(runner, /type: assignment[\s\S]*supervision_heartbeat: Silence before heartbeat deadline is neutral, not failure\. Heartbeat is telemetry, not completion evidence\./);
-    assert.match(runner, /type: assignment[\s\S]*supervision_no_interrupt: Parent must not cancel, interrupt, retire, or replace a quiet worker during the no-interrupt window\./);
+    assert.match(runner, /type: assignment[\s\S]*supervision_no_interrupt: Parent must not cancel or interrupt a quiet worker, mark its workflow state_retired, or replace it during the no-interrupt window\./);
     assert.match(runner, /type: assignment[\s\S]*Explicit completed, blocked, or failed results are not silence; collect and integrate them immediately\./);
     assert.match(runner, /type: assignment[\s\S]*If still running at heartbeat_interval, self-report progress with fields completed\/current\/blocker\/ETA; use blocker: none and ETA: unknown when unknown\./);
     assert.match(runner, /type: assignment[\s\S]*supervision_retire_cancel_reasons: completed_retire, user_stop, safety_stop, scope_violation, stale_timeout, blocker_or_failure, stale_premise/);
@@ -607,6 +803,8 @@ test("valid feature profile renders in assignment, collect, and run skeleton pac
       "debug.reproducer",
       "--status",
       "blocked",
+      "--lifecycle-disposition",
+      "continuation_expected",
       "--findings",
       "reproduction needs a fixture",
       "--blockers",
@@ -666,7 +864,7 @@ const prompt = args[args.length - 1] || "";
 if (!prompt.includes("feature_profile: runner.scope-guard")) process.exit(7);
 if (!prompt.includes("optional assignment overlay, not a resident agent or spawned worker")) process.exit(8);
 if (!prompt.includes("Silence before heartbeat deadline is neutral, not failure")) process.exit(9);
-if (!prompt.includes("Parent must not cancel, interrupt, retire, or replace a quiet worker during the no-interrupt window")) process.exit(10);
+if (!prompt.includes("Parent must not cancel or interrupt a quiet worker, mark its workflow state_retired, or replace it during the no-interrupt window")) process.exit(10);
 if (!prompt.includes("Explicit completed, blocked, or failed results are not silence; collect and integrate them immediately")) process.exit(15);
 if (!prompt.includes("If still running at heartbeat_interval, self-report progress with fields completed/current/blocker/ETA; use blocker: none and ETA: unknown when unknown.")) process.exit(16);
 if (!prompt.includes("Reuse mature GitHub/npm OSS directly")) process.exit(17);
@@ -786,12 +984,16 @@ test("verify rejects completed codex-cli runner results until parent integration
       "documentation",
       "--status",
       "completed",
+      "--lifecycle-disposition",
+      "state_retired",
+      "--cancel-reason",
+      "completed_retire",
       "--findings",
       "runner result was collected",
       "--verification",
       "parent integration recorded",
       "--next",
-      "retire completed subagent",
+      "record completed workflow state_retired",
       ...contractCoverageArgs("uncollected-runner"),
     ]);
     assert.equal(collect.status, 0, collect.stderr);
@@ -999,6 +1201,10 @@ test("omitted feature profile remains backwards compatible and records none", ()
       "README.md",
       "--status",
       "completed",
+      "--lifecycle-disposition",
+      "state_retired",
+      "--cancel-reason",
+      "completed_retire",
       "--findings",
       "done",
       "--changed-files",
@@ -1021,15 +1227,20 @@ test("legacy runner packets without work_type remain explicitly backwards compat
   const repo = makeTempGitRepo();
   try {
     intake(repo, { taskId: "work-type-legacy", epoch: "e1", scope: "README.md" });
-    const legacy = legacyRunnerWithoutWorkType("work-type-legacy");
+    assert.match(readState(repo, "task.md"), /lifecycle_contract_version: workflow_state_v1/);
+    const legacy = legacyRunnerWithoutWorkType("historical-pre-contract");
     assert.doesNotMatch(legacy, /work_type:/);
     assert.doesNotMatch(legacy, /hierarchy_mode|heartbeat_interval|cancel_reason_required/);
     writeFileSync(path.join(repo, ".coding-agents", "runner.md"), legacy, "utf8");
 
     const verify = runCli(["verify-assignments", "--target-cwd", repo]);
     assert.equal(verify.status, 0, verify.stdout + verify.stderr);
+    assert.match(verify.stdout, /legacy parent-integration lifecycle preserved as unknown_legacy \(1 checked\)/);
     const doctor = runCli(["doctor", "--target-cwd", repo]);
     assert.equal(doctor.status, 0, doctor.stdout + doctor.stderr);
+    assert.match(doctor.stdout, /legacy parent-integration lifecycle preserved as unknown_legacy \(1 checked\)/);
+    assert.equal(readState(repo, "runner.md"), legacy);
+    assert.doesNotMatch(readState(repo, "runner.md"), /lifecycle_scope|lifecycle_disposition|runtime_thread_disposition|runtime_changed/);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -2105,7 +2316,7 @@ function modernPacketFollowedByLegacyRunnerPacket(taskId) {
 function supervisionFieldLines() {
   return `- supervision_contract: Subagent Supervision Contract
 - supervision_heartbeat: Silence before heartbeat deadline is neutral, not failure. Heartbeat is telemetry, not completion evidence.
-- supervision_no_interrupt: Parent must not cancel, interrupt, retire, or replace a quiet worker during the no-interrupt window. Explicit completed, blocked, or failed results are not silence; collect and integrate them immediately.
+- supervision_no_interrupt: Parent must not cancel or interrupt a quiet worker, mark its workflow state_retired, or replace it during the no-interrupt window. Explicit completed, blocked, or failed results are not silence; collect and integrate them immediately.
 - supervision_self_report: If still running at heartbeat_interval, self-report progress with fields completed/current/blocker/ETA; use blocker: none and ETA: unknown when unknown.
 - supervision_retire_cancel_reasons: completed_retire, user_stop, safety_stop, scope_violation, stale_timeout, blocker_or_failure, stale_premise
 - supervision_stale_timeout_path: missed heartbeat -> soft ping/status request -> grace wait -> stale mark -> cancel/replace only if still silent or invalid

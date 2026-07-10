@@ -14,7 +14,7 @@ const LEGACY_DOCS_SEGMENTS = ["docs", "codex"];
 const RUNNER_FILE = "runner.md";
 const DEFAULT_RUNNER_TIMEOUT_MS = 120000;
 const SUBAGENT_LIFECYCLE =
-  "Parent closes or retires this subagent promptly after result integration, timeout/failure/blocker handling, stale premise/scope change, or final report when no further use is expected.";
+  "Parent records workflow-state disposition with collect: state_retired requires exactly one allowed cancel_reason, while continuation_expected records cancel_reason none. This workflow CLI does not interrupt, close, or reclaim runtime threads.";
 const CHILD_RETURN_LIFECYCLE =
   "Return concise parent-integration material and stop; do not stay open waiting for more work.";
 const DEBUG_INTEGRITY =
@@ -52,7 +52,7 @@ const SUPERVISION_CONTRACT_NAME = "Subagent Supervision Contract";
 const SUPERVISION_HEARTBEAT =
   "Silence before heartbeat deadline is neutral, not failure. Heartbeat is telemetry, not completion evidence.";
 const SUPERVISION_NO_INTERRUPT =
-  "Parent must not cancel, interrupt, retire, or replace a quiet worker during the no-interrupt window. Explicit completed, blocked, or failed results are not silence; collect and integrate them immediately.";
+  "Parent must not cancel or interrupt a quiet worker, mark its workflow state_retired, or replace it during the no-interrupt window. Explicit completed, blocked, or failed results are not silence; collect and integrate them immediately.";
 const SUPERVISION_SELF_REPORT =
   "If still running at heartbeat_interval, self-report progress with fields completed/current/blocker/ETA; use blocker: none and ETA: unknown when unknown.";
 const SUPERVISION_RETIRE_CANCEL_REASONS = [
@@ -63,6 +63,19 @@ const SUPERVISION_RETIRE_CANCEL_REASONS = [
   "stale_timeout",
   "blocker_or_failure",
   "stale_premise",
+];
+const LIFECYCLE_SCOPE = "workflow_state_only";
+const LIFECYCLE_CONTRACT_VERSION = "workflow_state_v1";
+const LIFECYCLE_DISPOSITIONS = ["state_retired", "continuation_expected"];
+const LEGACY_LIFECYCLE_DISPOSITION = "unknown_legacy";
+const RUNTIME_THREAD_DISPOSITION = "unmanaged_by_workflow_cli";
+const INTEGRATION_LIFECYCLE_FIELD_NAMES = [
+  "lifecycle_contract_version",
+  "lifecycle_scope",
+  "lifecycle_disposition",
+  "cancel_reason",
+  "runtime_thread_disposition",
+  "runtime_changed",
 ];
 const SUPERVISION_STALE_TIMEOUT_PATH =
   "missed heartbeat -> soft ping/status request -> grace wait -> stale mark -> cancel/replace only if still silent or invalid";
@@ -231,6 +244,9 @@ const REQUIRED_FILES = [
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
+  if (args.runtimeThreadClosed !== undefined) {
+    fail("--runtime-thread-closed is unsupported by every command: the workflow CLI cannot close or reclaim runtime threads", 1);
+  }
   if (args.help || !args.command) {
     printHelp();
     process.exit(0);
@@ -273,7 +289,11 @@ function parseArgs(argv) {
       if (!value || value.startsWith("--")) {
         throw new CliError(`missing value for --${key}`);
       }
-      parsed[toCamel(key)] = value;
+      const parsedKey = toCamel(key);
+      if (["lifecycle-disposition", "cancel-reason"].includes(key) && Object.hasOwn(parsed, parsedKey)) {
+        throw new CliError(`duplicate --${key}; provide exactly one value`);
+      }
+      parsed[parsedKey] = value;
       i += 1;
       continue;
     }
@@ -360,6 +380,11 @@ function collect(args) {
   console.log(`ok task_id: ${packet.taskId}`);
   console.log(`ok feature_profile: ${featureProfileId(packet)}`);
   console.log(`ok work_type: ${workTypeId(packet)}`);
+  console.log(`ok lifecycle_scope: ${packet.lifecycleScope}`);
+  console.log(`ok lifecycle_disposition: ${packet.lifecycleDisposition}`);
+  console.log(`ok cancel_reason: ${packet.cancelReason}`);
+  console.log(`ok runtime_thread_disposition: ${packet.runtimeThreadDisposition}`);
+  console.log(`ok runtime_changed: ${packet.runtimeChanged}`);
 }
 
 function run(args) {
@@ -730,7 +755,7 @@ Read these planning files in order:
 Operational log:
 
 - \`runner.md\`: optional; created by \`assign\`, \`collect\`, or \`run\` only.
-- Subagents are active only for scoped work and must be closed or retired promptly when their result is integrated, blocked, failed, timed out, stale, or no longer needed.
+- Subagents are active only for scoped work. After collection, record workflow-state disposition as state_retired or continuation_expected; this workflow record does not close or reclaim a runtime thread.
 - ${NESTED_CODING_AGENTS_PREFLIGHT}
 - ${SUPERVISION_HEARTBEAT}
 - ${SUPERVISION_NO_INTERRUPT}
@@ -762,7 +787,7 @@ function taskCompletionConditions(context) {
   return [
     { id: `${prefix}-001`, text: `Eight planning files exist in \`${STATE_DIR_NAME}\`.` },
     { id: `${prefix}-002`, text: "Fixed 14-role assignment scaffold sections include `role`, `status`, `task_id`, `epoch`, `scope`, `assignment`, `expected_output`, and `lifecycle`." },
-    { id: `${prefix}-003`, text: "Each generated assignment carries lifecycle guidance requiring concise integration material and prompt close/retire handling." },
+    { id: `${prefix}-003`, text: `Current task state and each new parent-integration packet carry lifecycle_contract_version=${LIFECYCLE_CONTRACT_VERSION}; current packets cannot fall back to unknown_legacy.` },
     { id: `${prefix}-004`, text: "Each generated child-worker prompt, assignment, handoff, and runner packet carries the nested Coding Agents preflight suppression rule." },
     { id: `${prefix}-005`, text: `Each generated child-worker prompt, assignment, handoff, and modern runner packet carries the ${SUPERVISION_CONTRACT_NAME}.` },
     { id: `${prefix}-006`, text: `Each generated assignment, handoff, and modern runner packet carries the ${CODING_CONDUCT_GATE_NAME}.` },
@@ -781,6 +806,8 @@ function renderTask(context) {
 - epoch: ${context.epoch}
 - scope: ${context.scope}
 - work_type: ${workTypeId(context)}
+- lifecycle_contract_version: ${LIFECYCLE_CONTRACT_VERSION}
+- lifecycle_contract_effective_at: ${context.timestamp}
 - task: ${context.task}
 
 ## ${CODING_CONDUCT_GATE_NAME}
@@ -827,11 +854,11 @@ function renderDecisions(context) {
 - impact: marketplace and plugin cache activation remain out of band.
 - contract_coverage_required: evidence must state whether marketplace, cache refresh, plugin activation, or restart boundaries were touched or deferred.
 
-## D-${context.taskId}-003 Subagent Lifecycle Closure
+## D-${context.taskId}-003 Workflow-State Lifecycle
 
 - accepted: subagents return concise parent-integration material and do not remain open waiting for more work.
-- impact: parent closes or retires no-longer-needed subagents after integration, timeout/failure/blocker handling, stale premise/scope change, and before final report.
-- contract_coverage_required: evidence must name collected worker results and close/retire status, or state that no workers were spawned.
+- impact: parent records each collected result as \`state_retired\` with exactly one allowed \`cancel_reason\`, or as \`continuation_expected\` with \`cancel_reason: none\`; the workflow CLI does not interrupt, close, or reclaim runtime threads.
+- contract_coverage_required: evidence must name collected worker results and workflow-state disposition, or state that no workers were spawned.
 
 ## D-${context.taskId}-004 Debugging Integrity
 
@@ -857,7 +884,7 @@ function renderDecisions(context) {
 
 - accepted: silence before heartbeat deadline is neutral, and heartbeat is telemetry rather than completion evidence.
 - retire_cancel_reasons: ${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}
-- impact: parent does not cancel, interrupt, retire, or replace a quiet worker during the no-interrupt window; stale timeout requires missed heartbeat, soft ping/status request, grace wait, stale mark, and only then cancel/replace if still silent or invalid.
+- impact: parent does not cancel or interrupt a quiet worker, mark its workflow \`state_retired\`, or replace it during the no-interrupt window; stale timeout requires missed heartbeat, soft ping/status request, grace wait, stale mark, and only then cancel/replace if still silent or invalid.
 - contract_coverage_required: evidence must show supervision fields exist in generated assignment, handoff, and runner material, or name the skipped surface.
 
 ## D-${context.taskId}-008 ${CODING_CONDUCT_GATE_NAME}
@@ -890,7 +917,7 @@ function renderAudit(context) {
 
 - Run implementation checks for the active task.
 - Record skipped checks with reasons.
-- Record any retire/cancel action with one explicit reason from ${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}.
+- Record each collected result with \`lifecycle_disposition\`; \`state_retired\` requires exactly one reason from ${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}, while \`continuation_expected\` records \`cancel_reason: none\`.
 - Record ${CODING_CONDUCT_GATE_NAME} checks, including OSS reuse decision, first-principles bug analysis when applicable, and no hidden fallback implementation.
 - For debug or repair work, record root cause, fix, and verification that the intended outcome now succeeds.
 - If metacognitive_gate_required is true, record ${METACOGNITIVE_GATE_FIELDS.join(", ")}.
@@ -1001,7 +1028,8 @@ ${renderContractCoverageGateState(context)}
 
 Subagent lifecycle:
 - Child workers return concise parent-integration material and stop instead of waiting for more work.
-- The parent closes or retires subagents after completed result integration, timeout/failure/blocker handling, stale premise/scope change, and before final report when no further use is expected.
+- The parent records \`state_retired\` with exactly one allowed \`cancel_reason\`, or \`continuation_expected\` with \`cancel_reason: none\`, when collecting a result.
+- These fields describe workflow state only; the workflow CLI does not interrupt, close, or reclaim a runtime thread, and process exit or interruption is not closure evidence.
 - If more work is needed after a stale premise, scope change, or failed verification, issue a fresh scoped assignment with current \`task_id\`, \`epoch\`, and \`scope\`.
 `;
 }
@@ -1013,7 +1041,7 @@ function normalizeGeneratedWorkflowDocument(text) {
 function normalizeReadmeDebugIntegrity(text, context = {}) {
   const block = `- ${DEBUG_INTEGRITY}`;
   const lifecycleLine =
-    "- Subagents are active only for scoped work and must be closed or retired promptly when their result is integrated, blocked, failed, timed out, stale, or no longer needed.";
+    "- Subagents are active only for scoped work. After collection, record workflow-state disposition as state_retired or continuation_expected; this workflow record does not close or reclaim a runtime thread.";
   let next = stripGeneratedWorkflowSurroundings(text).replace(
     new RegExp(
       `^- Subagents are active only for scoped work and must be closed or retired promptly\\n- ${escapeRegExp(DEBUG_INTEGRITY)} when their result is integrated, blocked, failed, timed out, stale, or no longer needed\\.$`,
@@ -1038,7 +1066,7 @@ function normalizeReadmeDebugIntegrity(text, context = {}) {
 function normalizeTaskDebugIntegrity(text, context = {}) {
   const block = "- Debug or repair work is not complete until root cause is identified, fixed, and verified against the intended outcome.";
   const lifecycleLine =
-    "- Each generated assignment carries lifecycle guidance requiring concise integration material and prompt close/retire handling.";
+    "- Each generated assignment carries lifecycle guidance, and each new parent-integration packet records workflow-state disposition without claiming runtime-thread closure.";
   let next = stripGeneratedWorkflowSurroundings(text).replace(
     new RegExp(
       `^- Each generated assignment carries lifecycle guidance\\n${escapeRegExp(block)} requiring concise integration material and prompt close/retire handling\\.$`,
@@ -1112,7 +1140,7 @@ function normalizeRunnerDebugIntegrity(text, context = {}) {
   if (!next.includes(DEBUG_INTEGRITY)) {
     next = insertAfterLineMatching(
       next,
-      /^Subagents are closed or retired after integration.*$/m,
+      /^(?:Subagents are closed or retired after integration|Collected results record workflow-state disposition).*$/m,
       DEBUG_INTEGRITY,
       DEBUG_INTEGRITY,
     );
@@ -1248,8 +1276,8 @@ function normalizeTaskSupervision(text) {
 }
 
 function normalizeAuditSupervision(text) {
-  const block = `- Record any retire/cancel action with one explicit reason from ${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}.`;
-  if (text.includes("Record any retire/cancel action")) return text;
+  const block = `- Record each collected result with lifecycle_disposition; state_retired requires one reason from ${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}, while continuation_expected records cancel_reason none.`;
+  if (text.includes("Record each collected result with lifecycle_disposition")) return text;
   return insertAfterLineMatching(text, /^- Record skipped checks with reasons\./m, block, block);
 }
 
@@ -1629,11 +1657,51 @@ function requireIntegrationPacket(args, commandContext) {
     completionCoverage: singleLine(args.completionCoverage || "not provided"),
     sourceSpecCoverage: singleLine(args.sourceSpecCoverage || "not provided"),
   };
+  Object.assign(packet, requireIntegrationLifecycle(args));
   packet.metacognitiveGate = resolvePacketMetacognitiveGate(commandContext, packet);
   packet.metacognitiveFields = readMetacognitiveArgs(args);
   validateIntegrationMetacognitivePacket(commandContext, packet);
   validateIntegrationContractCoveragePacket(commandContext, packet);
   return packet;
+}
+
+function requireIntegrationLifecycle(args) {
+  if (args.runtimeThreadClosed !== undefined) {
+    throw new CliError(
+      "--runtime-thread-closed is unsupported: collect records workflow state only and cannot close or reclaim a runtime thread",
+      1,
+    );
+  }
+
+  const lifecycleDisposition = singleLine(requireArg(args.lifecycleDisposition, "--lifecycle-disposition"));
+  if (!LIFECYCLE_DISPOSITIONS.includes(lifecycleDisposition)) {
+    throw new CliError(
+      `unknown lifecycle disposition: ${lifecycleDisposition}; expected ${LIFECYCLE_DISPOSITIONS.join(" or ")}`,
+      1,
+    );
+  }
+
+  let cancelReason = "none";
+  if (lifecycleDisposition === "state_retired") {
+    cancelReason = singleLine(requireArg(args.cancelReason, "--cancel-reason"));
+    if (!SUPERVISION_RETIRE_CANCEL_REASONS.includes(cancelReason)) {
+      throw new CliError(
+        `state_retired requires exactly one allowed --cancel-reason: ${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}`,
+        1,
+      );
+    }
+  } else if (args.cancelReason !== undefined) {
+    throw new CliError("continuation_expected rejects --cancel-reason; cancel_reason is recorded as none", 1);
+  }
+
+  return {
+    lifecycleContractVersion: LIFECYCLE_CONTRACT_VERSION,
+    lifecycleScope: LIFECYCLE_SCOPE,
+    lifecycleDisposition,
+    cancelReason,
+    runtimeThreadDisposition: RUNTIME_THREAD_DISPOSITION,
+    runtimeChanged: "false",
+  };
 }
 
 function assertValidIntakeForPacket(commandContext, packet, activity) {
@@ -1911,7 +1979,13 @@ ${renderMetacognitiveGatePacketSchema(packet.metacognitiveGate)}
 ${renderMetacognitiveResultFields(packet.metacognitiveGate, "not completed", packet.metacognitiveFields, {
   includeAll: isCompletionStatus(packet.status),
 })}
-- lifecycle: Parent integrates this packet, records any blocker or follow-up, then closes or retires the subagent unless an explicitly scoped continuation is required.`;
+- lifecycle_contract_version: ${packet.lifecycleContractVersion}
+- lifecycle_scope: ${packet.lifecycleScope}
+- lifecycle_disposition: ${packet.lifecycleDisposition}
+- cancel_reason: ${packet.cancelReason}
+- runtime_thread_disposition: ${packet.runtimeThreadDisposition}
+- runtime_changed: ${packet.runtimeChanged}
+- lifecycle: This packet records workflow-state disposition only. The workflow CLI does not interrupt, close, or reclaim runtime threads.`;
 }
 
 function renderOrchestrationSkeleton(packet) {
@@ -1981,7 +2055,7 @@ function appendRunnerEntry(commandContext, heading, entry) {
   const initial = `# Coding Agents Runner
 
 This file records CLI-issued assignments, parent-integration packets, process-orchestration skeletons, and process runner results.
-Subagents are closed or retired after integration, timeout/failure/blocker handling, stale premise/scope change, or final report when no further use is expected.
+Collected results record workflow-state disposition only. The workflow CLI does not interrupt, close, or reclaim runtime threads.
 ${NESTED_CODING_AGENTS_PREFLIGHT}
 ${renderSupervisionFields()}
 ${DEBUG_INTEGRITY}
@@ -2149,7 +2223,9 @@ function validateRunnerPackets(text, workflowGate = { required: false }, contrac
   const invalidCodingConductPackets = [];
   const invalidMetacognitivePackets = [];
   const invalidContractCoveragePackets = [];
+  const invalidLifecyclePackets = [];
   const uncollectedCompletedRunnerPackets = [];
+  let unknownLegacyLifecyclePackets = 0;
   let checked = 0;
 
   for (const section of sections) {
@@ -2187,6 +2263,9 @@ function validateRunnerPackets(text, workflowGate = { required: false }, contrac
           invalidPackets.push(`${section.split("\n")[0].replace(/^### /, "")}.${field}`);
         }
       }
+      const lifecycle = validateIntegrationLifecycleFields(section, workflowGate);
+      if (lifecycle.disposition === LEGACY_LIFECYCLE_DISPOSITION) unknownLegacyLifecyclePackets += 1;
+      for (const missing of lifecycle.missing) invalidLifecyclePackets.push(`${packetLabel(section)}.${missing}`);
     }
     if (type === "process-runner-result") {
       for (const field of ["status", "runner", "spawned", "exit_code", "summary", "failure", "debugging_integrity", "lifecycle"]) {
@@ -2247,9 +2326,17 @@ function validateRunnerPackets(text, workflowGate = { required: false }, contrac
     && invalidCodingConductPackets.length === 0
     && invalidMetacognitivePackets.length === 0
     && invalidContractCoveragePackets.length === 0
+    && invalidLifecyclePackets.length === 0
     && uncollectedCompletedRunnerPackets.length === 0
   ) {
-    return { results: [["ok", `runner packets valid (${checked} checked)`]], fatal: false };
+    const results = [["ok", `runner packets valid (${checked} checked)`]];
+    if (unknownLegacyLifecyclePackets > 0) {
+      results.push([
+        "ok",
+        `legacy parent-integration lifecycle preserved as ${LEGACY_LIFECYCLE_DISPOSITION} (${unknownLegacyLifecyclePackets} checked)`,
+      ]);
+    }
+    return { results, fatal: false };
   }
   const results = [];
   if (invalidPackets.length) results.push(["warn", `missing or empty runner packet fields: ${invalidPackets.join(", ")}`]);
@@ -2265,6 +2352,9 @@ function validateRunnerPackets(text, workflowGate = { required: false }, contrac
   if (invalidContractCoveragePackets.length) {
     results.push(["warn", `missing or incomplete contract coverage runner packet fields: ${invalidContractCoveragePackets.join(", ")}`]);
   }
+  if (invalidLifecyclePackets.length) {
+    results.push(["warn", `missing or invalid lifecycle runner packet fields: ${invalidLifecyclePackets.join(", ")}`]);
+  }
   if (uncollectedCompletedRunnerPackets.length) {
     results.push([
       "warn",
@@ -2272,6 +2362,64 @@ function validateRunnerPackets(text, workflowGate = { required: false }, contrac
     ]);
   }
   return { results, fatal: true };
+}
+
+function validateIntegrationLifecycleFields(section, workflowGate = {}) {
+  const runtimeThreadClosed = getFieldValue(section, "runtime_thread_closed");
+  if (runtimeThreadClosed) {
+    return {
+      valid: false,
+      missing: ["runtime_thread_closed unsupported"],
+      disposition: getFieldValue(section, "lifecycle_disposition") || LEGACY_LIFECYCLE_DISPOSITION,
+    };
+  }
+
+  const hasLifecycleFields = INTEGRATION_LIFECYCLE_FIELD_NAMES.some((field) => Boolean(getFieldValue(section, field)));
+  if (!hasLifecycleFields) {
+    if (isVerifiablyPreContractLifecyclePacket(section, workflowGate)) {
+      return { valid: true, missing: [], disposition: LEGACY_LIFECYCLE_DISPOSITION };
+    }
+    return {
+      valid: false,
+      missing: [...INTEGRATION_LIFECYCLE_FIELD_NAMES],
+      disposition: "missing_current_contract",
+    };
+  }
+
+  const missing = [];
+  if (getFieldValue(section, "lifecycle_contract_version") !== LIFECYCLE_CONTRACT_VERSION) {
+    missing.push("lifecycle_contract_version");
+  }
+  if (getFieldValue(section, "lifecycle_scope") !== LIFECYCLE_SCOPE) missing.push("lifecycle_scope");
+
+  const disposition = getFieldValue(section, "lifecycle_disposition");
+  if (!LIFECYCLE_DISPOSITIONS.includes(disposition)) missing.push("lifecycle_disposition");
+
+  const cancelReason = getFieldValue(section, "cancel_reason");
+  if (disposition === "state_retired") {
+    if (!SUPERVISION_RETIRE_CANCEL_REASONS.includes(cancelReason)) missing.push("cancel_reason");
+  } else if (disposition === "continuation_expected") {
+    if (cancelReason !== "none") missing.push("cancel_reason");
+  } else if (!cancelReason) {
+    missing.push("cancel_reason");
+  }
+
+  if (getFieldValue(section, "runtime_thread_disposition") !== RUNTIME_THREAD_DISPOSITION) {
+    missing.push("runtime_thread_disposition");
+  }
+  if (getFieldValue(section, "runtime_changed") !== "false") missing.push("runtime_changed");
+
+  return { valid: missing.length === 0, missing, disposition };
+}
+
+function isVerifiablyPreContractLifecyclePacket(section, workflowGate) {
+  if (!workflowGate?.lifecycleContractVersion) return true;
+  if (workflowGate.lifecycleContractVersion !== LIFECYCLE_CONTRACT_VERSION) return false;
+  if (isCurrentWorkflowPacket(section, workflowGate)) return false;
+
+  const effectiveAt = Date.parse(workflowGate.lifecycleContractEffectiveAt || "");
+  const observedAt = Date.parse(packetTimestamp(section));
+  return Number.isFinite(effectiveAt) && Number.isFinite(observedAt) && observedAt < effectiveAt;
 }
 
 function isCurrentWorkflowPacket(section, workflowGate) {
@@ -2379,6 +2527,8 @@ function readWorkflowMetacognitiveContext(stateDir) {
   const scope = identity.scope;
   const task = getFieldValue(text, "task");
   const workType = resolveWorkType(getFieldValue(text, "work_type") || DEFAULT_WORK_TYPE);
+  const lifecycleContractVersion = getFieldValue(text, "lifecycle_contract_version");
+  const lifecycleContractEffectiveAt = getFieldValue(text, "lifecycle_contract_effective_at");
   const gateSection = getMetacognitiveGateFieldSection(text);
   const declaredRequired = getFieldValue(gateSection, "metacognitive_gate_required") === "true";
   const declaredTriggers = splitList(getFieldValue(gateSection, "metacognitive_gate_triggers")).filter((item) => item !== "none");
@@ -2394,6 +2544,8 @@ function readWorkflowMetacognitiveContext(stateDir) {
     scope,
     task,
     workType,
+    lifecycleContractVersion,
+    lifecycleContractEffectiveAt,
     identityErrors: identity.errors,
   };
 }
@@ -2643,7 +2795,7 @@ function validateSupervisionContractFields(section) {
   const noInterrupt = getFieldValue(section, "supervision_no_interrupt");
   if (
     !noInterrupt
-    || !/must not cancel, interrupt, retire, or replace/i.test(noInterrupt)
+    || !/(?:must not cancel, interrupt, retire, or replace|must not cancel or interrupt a quiet worker, mark its workflow state_retired, or replace it)/i.test(noInterrupt)
     || !/no-interrupt window/i.test(noInterrupt)
   ) {
     missing.push("supervision_no_interrupt");
@@ -3117,9 +3269,9 @@ function packetLabel(section) {
 
 function renderRunnerLifecycle(result) {
   if (result.status === "completed") {
-    return "Parent integrates the completed result, then closes or retires the subagent unless an explicitly scoped continuation is required.";
+    return "Parent integrates the completed result, then collect records state_retired or continuation_expected. Process exit is not runtime-thread closure evidence.";
   }
-  return "Parent records the failure, timeout, or blocker, retires this subagent context, and issues a fresh scoped assignment only if more work is still required.";
+  return "Parent records the failure, timeout, or blocker, then collect records workflow-state disposition. The workflow CLI does not close or reclaim runtime threads.";
 }
 
 function upsertGenerated(filePath, body) {
@@ -3496,7 +3648,7 @@ function printHelp() {
 Usage:
   node bin/coding-agents.mjs intake [--cwd <path>] [--target-cwd <path>] [--work-type <id>] --task <text> --task-id <id> --epoch <epoch> --scope <scope>
   node bin/coding-agents.mjs assign [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] [--hierarchy-mode none|one_level|n_level] [--max-depth <n>] [--depth <n>] [--remaining-depth <n>] [--heartbeat-interval <ISO-8601 duration>] [--heartbeat-deadline <ISO-8601 duration>] [--max-silence <ISO-8601 duration>] [--soft-timeout <ISO-8601 duration>] [--hard-timeout <ISO-8601 duration>] [--no-interrupt-until <ISO-8601 duration>] --assignment <text> --expected-output <text>
-  node bin/coding-agents.mjs collect [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] --status <status> [--findings <text>] [--changed-files <text>] [--verification <text>] [--blockers <text>] [--assumptions <text>] [--next <text>] [--decision-coverage <text>] [--completion-coverage <text>] [--source-spec-coverage <text>] [--expected-outcome <text>] [--actual-result <text>] [--reproduction-or-evidence <text>] [--failure-point <text>] [--hypothesis-branches <text>] [--source-of-truth-boundary <text>] [--plugin-contract-boundary <text>] [--generated-artifact-boundary <text>] [--before-context-effects <text>] [--after-context-effects <text>] [--cross-feature-consequences <text>] [--root-cause <text>] [--fix-summary <text>] [--verification-evidence <text>] [--skipped-checks <text>] [--unresolved-risks <text>] [--next-investigation <text>]
+  node bin/coding-agents.mjs collect [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] --status <status> --lifecycle-disposition state_retired|continuation_expected [--cancel-reason <allowed-reason>] [--findings <text>] [--changed-files <text>] [--verification <text>] [--blockers <text>] [--assumptions <text>] [--next <text>] [--decision-coverage <text>] [--completion-coverage <text>] [--source-spec-coverage <text>] [--expected-outcome <text>] [--actual-result <text>] [--reproduction-or-evidence <text>] [--failure-point <text>] [--hypothesis-branches <text>] [--source-of-truth-boundary <text>] [--plugin-contract-boundary <text>] [--generated-artifact-boundary <text>] [--before-context-effects <text>] [--after-context-effects <text>] [--cross-feature-consequences <text>] [--root-cause <text>] [--fix-summary <text>] [--verification-evidence <text>] [--skipped-checks <text>] [--unresolved-risks <text>] [--next-investigation <text>]
   node bin/coding-agents.mjs run|orchestrate [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] [--hierarchy-mode none|one_level|n_level] [--max-depth <n>] [--depth <n>] [--remaining-depth <n>] [--heartbeat-interval <ISO-8601 duration>] [--heartbeat-deadline <ISO-8601 duration>] [--max-silence <ISO-8601 duration>] [--soft-timeout <ISO-8601 duration>] [--hard-timeout <ISO-8601 duration>] [--no-interrupt-until <ISO-8601 duration>] --assignment <text> --expected-output <text> [--runner codex-cli] [--timeout-ms <ms>]
   node bin/coding-agents.mjs verify-assignments [--cwd <path>] [--target-cwd <path>]
   node bin/coding-agents.mjs normalize-debugging-integrity [--cwd <path>] [--target-cwd <path>] [--execute]
@@ -3507,7 +3659,7 @@ Usage:
 Commands:
   intake   Create or update target .coding-agents workflow files.
   assign   Record a scoped specialist assignment in .coding-agents/runner.md.
-  collect  Record a parent-integration packet returned by a specialist.
+  collect  Record a parent-integration packet and its workflow-state-only lifecycle disposition. state_retired requires exactly one allowed --cancel-reason; continuation_expected rejects --cancel-reason.
   run/orchestrate
            Record an assignment and orchestration skeleton by default; with --runner codex-cli, spawn codex exec and record normalized results.
   verify-assignments
@@ -3525,9 +3677,12 @@ State:
   With --target-cwd, --cwd records the invocation cwd (or process cwd when omitted) while state and runner execution use --target-cwd.
   Existing docs/codex directories are migration input or hints only; they are never operational state fallback or write targets.
   State writes add .coding-agents/ to .git/info/exclude; .gitignore is not edited.
-  Generated assignments, handoff prompts, and runner packets carry lifecycle closure, supervision, coding conduct, and debugging integrity rules.
+  Generated assignments, handoff prompts, and runner packets carry workflow-state lifecycle, supervision, coding conduct, and debugging integrity rules.
+  Current task state and modern parent-integration packets record lifecycle_contract_version=${LIFECYCLE_CONTRACT_VERSION}. Modern packets also record lifecycle_scope=workflow_state_only, lifecycle_disposition, cancel_reason, runtime_thread_disposition=unmanaged_by_workflow_cli, and runtime_changed=false.
+  Fieldless current packets are invalid. unknown_legacy is accepted only for pre-contract workflow state or non-current packets that predate the recorded lifecycle contract activation time; validation does not synthesize retirement.
+  --runtime-thread-closed is rejected globally for every command. The workflow CLI never emits or accepts runtime_thread_closed=true. Interruption and process exit are not runtime-thread closure evidence.
   Parent-managed child-worker prompts also suppress nested Coding Agents preflight; child workers do not ask \`coding-agents を使いますか？ [Y/n]\` or start independent nested Coding Agents workflows inside an assigned task_id/epoch/scope. Descendant delegation is allowed only when finite hierarchy fields grant remaining_depth > 0 and inherited supervision is preserved.
-  Supervision treats silence before heartbeat deadline as neutral, forbids cancel/interrupt/retire/replace of quiet workers during the no-interrupt window, requires workers that are still running at heartbeat_interval to self-report completed/current/blocker/ETA progress, treats explicit completed/blocked/failed results as immediate collect/integrate triggers rather than silence, treats heartbeat as telemetry rather than completion evidence, requires explicit retire/cancel reasons (${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}), and uses missed heartbeat -> soft ping/status request -> grace wait -> stale mark before cancel/replace.
+  Supervision treats silence before heartbeat deadline as neutral, forbids cancel/interruption/workflow state_retired/replacement of quiet workers during the no-interrupt window, requires workers that are still running at heartbeat_interval to self-report completed/current/blocker/ETA progress, treats explicit completed/blocked/failed results as immediate collect/integrate triggers rather than silence, treats heartbeat as telemetry rather than completion evidence, requires explicit state_retired reasons (${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}), and uses missed heartbeat -> soft ping/status request -> grace wait -> stale mark before cancel/replace.
   Optional --feature-profile overlays provide scoped assignment guidance only. Known ids: ${knownFeatureProfileIds().join(", ")}.
   Optional --work-type is semantic command metadata. Known ids: ${knownWorkTypeIds().join(", ")}.
   --work-type auto preserves keyword/path inference. --work-type source-change and --work-type debug force the metacognitive gate for that command.
