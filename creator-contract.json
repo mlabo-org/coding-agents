@@ -1,0 +1,130 @@
+{
+  "schema_version": "creator-contract/v1",
+  "kind": "plugin",
+  "capability_id": "coding-agents",
+  "official_creator": "plugin-creator",
+  "routing": {
+    "task_class": "Explicit Coding Agents workflow-state and source CLI continuation, audit, or repair",
+    "natural_language_triggers": [
+      "Coding Agents",
+      "coding-agents",
+      "continue, audit, or repair .coding-agents state"
+    ],
+    "primary_route": "Use Coding Agents only after an explicit trigger, preserve .coding-agents workflow records, and dispatch actual workers only through official Codex subagent spawn tools.",
+    "fallback_conditions": [
+      "When official Codex subagent tools are unavailable, keep execution in the parent thread and do not launch a CLI process runner."
+    ],
+    "non_use_conditions": [
+      "Generic coding, debugging, source changes, delegation, or subagent coordination do not trigger Coding Agents."
+    ],
+    "discovery": {
+      "task_terms": [
+        "Coding Agents"
+      ],
+      "trigger_phrases": [
+        "continue, audit, or repair"
+      ],
+      "artifact_or_tool_terms": [
+        ".coding-agents"
+      ],
+      "aliases": [
+        "coding-agents"
+      ]
+    }
+  },
+  "inputs": [
+    {
+      "name": "Explicit workflow request",
+      "description": "A user-named Coding Agents request or a request to continue, audit, or repair existing .coding-agents state or the source CLI."
+    },
+    {
+      "name": "Target repository and workflow identity",
+      "description": "The target Git worktree plus task_id, epoch, scope, and optional work type or assignment overlay."
+    }
+  ],
+  "outputs": [
+    {
+      "name": "Workflow-state packets",
+      "description": "Validated .coding-agents intake, assignment, collection, finalization, orchestration-skeleton, audit, and handoff records."
+    },
+    {
+      "name": "Official subagent dispatch boundary",
+      "description": "Actual workers are dispatched only through official Codex subagent spawn tools; the CLI emits no Codex child process."
+    }
+  ],
+  "validation_commands": [
+    {
+      "name": "official-plugin-validation",
+      "argv": [
+        "/Users/suzukimakoto/.codex/skills/codex-python-runtime/scripts/codex-python",
+        "/Users/suzukimakoto/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py",
+        "."
+      ],
+      "covers": [],
+      "test_paths": [],
+      "cwd": ".",
+      "timeout_seconds": 120
+    },
+    {
+      "name": "full-contract-tests",
+      "argv": [
+        "/usr/bin/env",
+        "npm",
+        "test"
+      ],
+      "covers": [
+        "official-spawn-only",
+        "workflow-state-preserved"
+      ],
+      "test_paths": [
+        "tests/metacognitive-gate.test.mjs",
+        "tests/routing-metadata.test.mjs",
+        "tests/workflow-state.test.mjs"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 180
+    }
+  ],
+  "runtime_boundaries": {
+    "source_of_truth": ".",
+    "generated_or_runtime_paths": [
+      ".coding-agents/",
+      "/Users/suzukimakoto/.codex/plugins/cache/local-plugins/coding-agents/"
+    ],
+    "forbidden_source_paths": [
+      ".coding-agents/",
+      "/Users/suzukimakoto/.codex/plugins/cache/",
+      "/Users/suzukimakoto/.codex/skills/.system/"
+    ]
+  },
+  "user_facing_ui": {
+    "present": false
+  },
+  "production_contract": {
+    "reviewed": true,
+    "rules": [
+      {
+        "id": "official-spawn-only",
+        "description": "The source CLI records assignments and orchestration skeletons but never launches Codex workers; actual dispatch uses only official Codex subagent spawn tools.",
+        "enforcement_points": [
+          "bin/coding-agents.mjs"
+        ],
+        "tests": [
+          "tests/routing-metadata.test.mjs",
+          "tests/workflow-state.test.mjs"
+        ]
+      },
+      {
+        "id": "workflow-state-preserved",
+        "description": "The .coding-agents intake, assignment, collection, finalization, handoff, doctor, verification, lifecycle, and historical packet compatibility remain enforced.",
+        "enforcement_points": [
+          "bin/coding-agents.mjs"
+        ],
+        "tests": [
+          "tests/metacognitive-gate.test.mjs",
+          "tests/workflow-state.test.mjs"
+        ]
+      }
+    ]
+  }
+}

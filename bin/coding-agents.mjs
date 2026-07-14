@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
-import os from "node:os";
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const TOOL = "coding-agents";
@@ -12,7 +11,6 @@ const END = "<!-- coding-agents-mvp:end -->";
 const STATE_DIR_NAME = ".coding-agents";
 const LEGACY_DOCS_SEGMENTS = ["docs", "codex"];
 const RUNNER_FILE = "runner.md";
-const DEFAULT_RUNNER_TIMEOUT_MS = 120000;
 const SUBAGENT_LIFECYCLE =
   "Parent records workflow-state disposition with collect: state_retired requires exactly one allowed cancel_reason, while continuation_expected records cancel_reason none. This workflow CLI does not interrupt, close, or reclaim runtime threads.";
 const CHILD_RETURN_LIFECYCLE =
@@ -30,7 +28,7 @@ const METACOGNITIVE_GATE_NAME = "Meta-Cognitive Debug/Repair Gate";
 const METACOGNITIVE_GATE_CONTRACT =
   "For gate-required source-change/debug/repair/SOT/plugin-contract/generated-artifact inconsistency work, explicitly capture before/after context effects, cross-feature consequences, root cause, fix, verification evidence, skipped checks, unresolved risks, and next investigation.";
 const METACOGNITIVE_GATE_COMPLETION_PROMPT =
-  "Assignment and skeleton packets expose this schema only; completed worker-result-collection or process-runner-result packets must fill every listed field with actual evidence.";
+  "Assignment and skeleton packets expose this schema only; completed worker-result-collection packets and historical process-runner-result packets must fill every listed field with actual evidence.";
 const METACOGNITIVE_PRE_GATE_BLOCKER =
   "pre-metacognitive-gate packet claimed completion without the required metacognitive result fields";
 const METACOGNITIVE_PRE_GATE_NEXT =
@@ -254,6 +252,9 @@ function main() {
   if (args.runtimeThreadClosed !== undefined) {
     fail("--runtime-thread-closed is unsupported by every command: the workflow CLI cannot close or reclaim runtime threads", 1);
   }
+  if (args.runner !== undefined || args.timeoutMs !== undefined) {
+    fail("--runner and --timeout-ms are unsupported: this CLI never launches Codex workers; use the official Codex subagent spawn tools", 1);
+  }
   if (args.help || !args.command) {
     printHelp();
     process.exit(0);
@@ -414,196 +415,13 @@ function run(args) {
   const packet = requireAssignmentPacket(args, commandContext);
   assertValidIntakeForPacket(commandContext, packet, args.command || "run");
 
-  if (args.runner) {
-    const runnerOptions = prepareRunnerExecution(commandContext, packet, args);
-    appendRunnerEntry(commandContext, "Issued Assignments", renderAssignmentPacket(packet));
-    const result = runWithRunner(commandContext, packet, runnerOptions);
-    appendRunnerEntry(commandContext, "Process Runner Results", renderRunnerResult(result));
-    console.log(`ok runner: ${result.runner}`);
-    console.log(`ok spawned: ${result.spawned}`);
-    console.log(`ok exit_code: ${formatExitCode(result.exitCode)}`);
-    console.log(`ok status: ${result.status}`);
-    console.log(`ok feature_profile: ${featureProfileId(packet)}`);
-    console.log(`ok work_type: ${workTypeId(packet)}`);
-    if (result.summary) console.log(`ok summary: ${result.summary}`);
-    if (result.status !== "completed") {
-      throw new CliError(`runner ${result.runner} failed: ${result.failure}`, result.exitCode || 1);
-    }
-    return;
-  }
-
   appendRunnerEntry(commandContext, "Issued Assignments", renderAssignmentPacket(packet));
   appendRunnerEntry(commandContext, "Process Orchestration Skeletons", renderOrchestrationSkeleton(packet));
   console.log(`ok run skeleton: ${packet.role}`);
   console.log("ok spawned: false");
   console.log(`ok feature_profile: ${featureProfileId(packet)}`);
   console.log(`ok work_type: ${workTypeId(packet)}`);
-  console.log("ok note: real process orchestration is deferred; runner recorded the scoped assignment and skeleton only");
-}
-
-function prepareRunnerExecution(commandContext, packet, args) {
-  const runner = singleLine(args.runner);
-  if (runner !== "codex-cli") {
-    throw new CliError(`unknown runner: ${runner}; expected codex-cli`, 1);
-  }
-  const timeoutMs = parsePositiveInt(args.timeoutMs || DEFAULT_RUNNER_TIMEOUT_MS, "--timeout-ms");
-  const scopePrefixes = assertMachineRunnableScope(packet, commandContext.targetCwd);
-  assertNoDirtyPathsOutsideMachineScope(commandContext.targetCwd, packet.scope, scopePrefixes);
-  return { runner, timeoutMs, scopePrefixes };
-}
-
-function runWithRunner(commandContext, packet, options) {
-  if (options.runner === "codex-cli") {
-    return runCodexCli(commandContext, packet, options);
-  }
-  throw new CliError(`unknown runner: ${options.runner}; expected codex-cli`, 1);
-}
-
-function runCodexCli(commandContext, packet, options) {
-  const { timeoutMs, scopePrefixes } = options;
-  const tempDir = mkdtempSync(path.join(os.tmpdir(), "coding-agents-runner-"));
-  const outputPath = path.join(tempDir, "last-message.md");
-  const prompt = renderRunnerPrompt(packet);
-  const cwd = commandContext.targetCwd;
-  const beforePaths = readGitChangedPaths(cwd);
-  const codexArgs = [
-    "exec",
-    "--cd",
-    cwd,
-    "--sandbox",
-    "workspace-write",
-    "-c",
-    'approval_policy="never"',
-    "--color",
-    "never",
-    "--output-last-message",
-    outputPath,
-    prompt,
-  ];
-  let result;
-  try {
-    result = spawnSync("codex", codexArgs, {
-      cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: timeoutMs,
-      maxBuffer: 1024 * 1024,
-    });
-    const normalized = normalizeCodexResult(packet, {
-      runner: "codex-cli",
-      timeoutMs,
-      outputPath,
-      result,
-    });
-    return applyScopeGuard(normalized, packet, cwd, beforePaths, scopePrefixes);
-  } finally {
-    rmSync(tempDir, { recursive: true, force: true });
-  }
-}
-
-function normalizeCodexResult(packet, context) {
-  const { result, runner, timeoutMs, outputPath } = context;
-  const errorCode = result.error?.code || "";
-  const timedOut = errorCode === "ETIMEDOUT";
-  const unavailable = errorCode === "ENOENT";
-  const exitCode = typeof result.status === "number" ? result.status : null;
-  const lastMessage = existsSync(outputPath) ? readFileSync(outputPath, "utf8") : "";
-  const summarySource = lastMessage || result.stdout || result.stderr || result.error?.message || "";
-  const baseStatus = !result.error && exitCode === 0 ? "completed" : "failed";
-  const metacognitiveFields = extractMetacognitiveFields(summarySource);
-  const missingMetacognitiveFields =
-    packet.metacognitiveGate?.required && baseStatus === "completed"
-      ? missingCompletedMetacognitiveFields(metacognitiveFields)
-      : [];
-  const status = missingMetacognitiveFields.length ? "failed" : baseStatus;
-  const failure = missingMetacognitiveFields.length
-    ? `completed runner result missing metacognitive gate fields: ${missingMetacognitiveFields.join(", ")}`
-    : runnerFailure({ result, exitCode, timedOut, unavailable, timeoutMs });
-
-  return {
-    type: "process-runner-result",
-    timestamp: new Date().toISOString(),
-    role: packet.role,
-    taskId: packet.taskId,
-    epoch: packet.epoch,
-    scope: packet.scope,
-    featureProfile: packet.featureProfile,
-    workType: packet.workType,
-    hierarchyFields: packet.hierarchyFields,
-    supervisionTimingFields: packet.supervisionTimingFields,
-    invocationCwd: packet.invocationCwd,
-    targetCwd: packet.targetCwd,
-    runner,
-    status,
-    spawned: !unavailable,
-    exitCode,
-    signal: result.signal || "none",
-    timeoutMs,
-    assignment: packet.assignment,
-    expectedOutput: packet.expectedOutput,
-    summary: summarizeRunnerOutput(summarySource),
-    finalizationReferences: getFieldValue(summarySource, FINALIZATION_REFERENCES_FIELD) || "none",
-    failure,
-    metacognitiveGate: packet.metacognitiveGate,
-    metacognitiveFields,
-  };
-}
-
-function runnerFailure({ result, exitCode, timedOut, unavailable, timeoutMs }) {
-  if (!result.error && exitCode === 0) return "none";
-  if (unavailable) return "codex executable unavailable";
-  if (timedOut) return `timeout after ${timeoutMs}ms`;
-  if (typeof exitCode === "number" && exitCode !== 0) return `nonzero exit ${exitCode}`;
-  if (result.error?.message) return singleLine(result.error.message);
-  return "runner failed";
-}
-
-function renderRunnerPrompt(packet) {
-  return `You are a Coding Agents child worker. Follow this assignment exactly and return concise worker-result material only.
-
-role: ${packet.role}
-task_id: ${packet.taskId}
-epoch: ${packet.epoch}
-scope: ${packet.scope}
-feature_profile: ${featureProfileId(packet)}
-work_type: ${workTypeId(packet)}
-invocation_cwd: ${packet.invocationCwd}
-target_cwd: ${packet.targetCwd}
-assignment: ${packet.assignment}
-expected_output: ${packet.expectedOutput}
-
-Boundaries:
-- Treat the process cwd as the target/jobsite cwd: ${packet.targetCwd}.
-- Do not treat the invocation cwd as the workflow state root unless it is the same as the target/jobsite cwd.
-- Stay inside the declared scope.
-- ${NESTED_CODING_AGENTS_PREFLIGHT}
-- Preserve unrelated user or worker changes.
-- Do not commit.
-- Do not edit ~/.codex/plugins/cache directly.
-- Do not claim success for unavailable, skipped, or failed checks.
-- ${renderFeatureProfilePromptGuidance(packet)}
-- ${DEBUG_INTEGRITY}
-${CODING_CONDUCT_GATE_NAME}:
-${renderCodingConductFields()}
-${renderRunnerPromptContractCoverageGate(packet)}
-${renderRunnerPromptMetacognitiveGate(packet)}
-
-${renderSupervisionPromptSection(packet)}
-
-Lifecycle:
-- ${CHILD_RETURN_LIFECYCLE}
-- ${SUBAGENT_LIFECYCLE}
-
-Return exactly these sections, kept concise:
-- findings:
-- changed_files:
-- verification:
-- blockers:
-- unresolved_assumptions:
-- ${FINALIZATION_REFERENCES_FIELD}:
-${renderMetacognitiveReturnSections(packet)}
-- next:
-`;
+  console.log("ok note: record-only; dispatch subagents through the official Codex spawn tools outside this CLI");
 }
 
 function verifyAssignments(args) {
@@ -815,7 +633,7 @@ function taskCompletionConditions(context) {
     { id: `${prefix}-005`, text: `Each generated child-worker prompt, assignment, handoff, and modern runner packet carries the ${SUPERVISION_CONTRACT_NAME}.` },
     { id: `${prefix}-006`, text: `Each generated assignment, handoff, and modern runner packet carries the ${CODING_CONDUCT_GATE_NAME}.` },
     { id: `${prefix}-007`, text: "Debug or repair work is not complete until root cause is identified, fixed, and verified against the intended outcome." },
-    { id: `${prefix}-008`, text: "If `metacognitive_gate_required: true`, assignments, runner prompts, runner packets, and completed worker-result-collection packets must carry all metacognitive gate fields." },
+    { id: `${prefix}-008`, text: "If `metacognitive_gate_required: true`, assignments, handoff material, runner packets, and completed worker-result-collection packets must carry all metacognitive gate fields." },
     { id: `${prefix}-009`, text: "A task-finalization packet carries typed Contract Coverage references for every active D-* accepted decision, C-* completion condition, and source/spec check." },
     { id: `${prefix}-010`, text: "Handoff prompt is available for the next worker." },
   ];
@@ -893,7 +711,7 @@ function renderDecisions(context) {
 
 - accepted: parent-managed child workers must not ask whether to use Coding Agents again or start an independent nested Coding Agents workflow.
 - impact: generated worker material must direct child workers to proceed inside task_id, epoch, scope, finite hierarchy, and supervision lineage while still stopping for scope expansion, destructive operations, external sending, commits, cache refresh, plugin activation, or unrelated edits.
-- contract_coverage_required: evidence must show generated assignment, handoff, runner prompt, or runner packet material carries this suppression rule when worker material is produced.
+- contract_coverage_required: evidence must show generated assignment, handoff, or runner packet material carries this suppression rule when worker material is produced.
 
 ## D-${context.taskId}-006 ${METACOGNITIVE_GATE_NAME}
 
@@ -1808,161 +1626,6 @@ function assertNormalizableWorkflowIdentity(stateDir) {
   }
 }
 
-function assertMachineRunnableScope(packet, cwd) {
-  const prefixes = parseMachineScopePrefixes(packet.scope, cwd);
-  if (!prefixes) {
-    throw new CliError(
-      `run --runner codex-cli requires a machine-checkable path-only scope; use scope:v1 all, scope:v1 paths=<comma-separated prefixes>, or a legacy simple path-only scope; got scope: ${packet.scope}`,
-      1,
-    );
-  }
-  return prefixes;
-}
-
-function assertNoDirtyPathsOutsideMachineScope(cwd, scope, prefixes) {
-  if (prefixes.includes(".")) return;
-  const dirtyOutsideScope = readGitChangedPaths(cwd)
-    .filter((changedPath) => !isPathAllowedByScope(changedPath, prefixes));
-  if (dirtyOutsideScope.length) {
-    throw new CliError(
-      `run --runner codex-cli refuses to launch with dirty files outside scope ${scope}: ${dirtyOutsideScope.join(", ")}`,
-      1,
-    );
-  }
-}
-
-function applyScopeGuard(result, packet, cwd, beforePaths, scopePrefixes = null) {
-  const prefixes = scopePrefixes || parseMachineScopePrefixes(packet.scope, cwd);
-  if (!prefixes) {
-    return {
-      ...result,
-      status: "failed",
-      failure: `runner scope is not machine-checkable: ${packet.scope}`,
-    };
-  }
-  if (prefixes.includes(".")) return result;
-
-  const afterPaths = readGitChangedPaths(cwd);
-  const changedAfterRunner = afterPaths.filter((changedPath) => !beforePaths.includes(changedPath));
-  const outsideScope = changedAfterRunner.filter((changedPath) => !isPathAllowedByScope(changedPath, prefixes));
-  if (!outsideScope.length) return result;
-
-  return {
-    ...result,
-    status: "failed",
-    failure: `runner changed files outside scope ${packet.scope}: ${outsideScope.join(", ")}`,
-  };
-}
-
-function hasNegativeScopeWording(scope) {
-  return /\b(?:do\s+not|don't|must\s+not|never|except|exclude(?:s|d|ing)?|excluding|forbid(?:s)?|forbidden|outside\s+(?:the\s+)?scope|outside\s+of|not\s+(?:edit|touch|modify|change))\b|禁止|除外|以外|編集しない|変更しない|触らない/i
-    .test(String(scope || ""));
-}
-
-function parseMachineScopePrefixes(scope, cwd) {
-  const rawScope = String(scope || "");
-  if (/[\r\n]/.test(rawScope)) {
-    throw new CliError("run --runner codex-cli scope must be single-line; CR/LF are not allowed", 1);
-  }
-  if (hasNegativeScopeWording(rawScope)) {
-    throw new CliError(
-      `run --runner codex-cli requires an affirmative machine-checkable path scope; negative or exclusion wording is not supported: ${rawScope}`,
-      1,
-    );
-  }
-
-  const normalizedScope = rawScope.trim();
-  if (!normalizedScope) return null;
-  if (/^scope:v1(?:\s+|$)/i.test(normalizedScope)) {
-    return parseScopeV1Prefixes(normalizedScope, cwd);
-  }
-  if (/^(?:\.|\.\/|repository|repo|target repo|whole repo|entire repo)$/i.test(normalizedScope)) return ["."];
-
-  const prefixes = [];
-  const tokens = normalizedScope.split(/\s+/);
-  for (const rawToken of tokens) {
-    const token = stripScopeTokenPunctuation(rawToken);
-    if (!isLegacyPathOnlyScopeToken(token)) return null;
-    prefixes.push(scopeTokenToRelativePath(token, cwd));
-  }
-  return prefixes.length ? [...new Set(prefixes)] : null;
-}
-
-function parseScopeV1Prefixes(scope, cwd) {
-  const body = scope.replace(/^scope:v1(?:\s+|$)/i, "").trim();
-  if (body === "all") return ["."];
-  if (!body.startsWith("paths=")) {
-    throw new CliError(`invalid scope:v1 runner scope; expected "scope:v1 all" or "scope:v1 paths=<comma-separated prefixes>": ${scope}`, 1);
-  }
-
-  const pathsValue = body.slice("paths=".length);
-  if (!pathsValue) {
-    throw new CliError("invalid scope:v1 paths list: empty path item", 1);
-  }
-
-  const prefixes = pathsValue.split(",").map((item) => {
-    if (!item.trim()) {
-      throw new CliError("invalid scope:v1 paths list: empty path item", 1);
-    }
-    return scopeTokenToRelativePath(item.trim(), cwd);
-  });
-  return [...new Set(prefixes)];
-}
-
-function stripScopeTokenPunctuation(token) {
-  return token.trim().replace(/^["'`([{]+|["'`)\]}:]+$/g, "");
-}
-
-function isLegacyPathOnlyScopeToken(token) {
-  if (!token || token === "." || token === "./") return Boolean(token);
-  if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(token)) return false;
-  if (/[,;*?\[\]{}]/.test(token)) return false;
-  if (token.startsWith("~")) return false;
-  if (token.split(/[\\/]+/).includes("..")) return false;
-  return token.startsWith("/")
-    || token.startsWith("./")
-    || token.includes("/")
-    || /\.[A-Za-z0-9]+$/.test(token);
-}
-
-function scopeTokenToRelativePath(token, cwd) {
-  const cleaned = String(token || "").replace(/\\/g, "/").replace(/\/+$/g, "");
-  if (!cleaned) {
-    throw new CliError("invalid runner scope path: empty path item", 1);
-  }
-  if (/[\r\n]/.test(cleaned)) {
-    throw new CliError("invalid runner scope path: CR/LF are not allowed", 1);
-  }
-  if (cleaned.startsWith("~")) {
-    throw new CliError(`invalid runner scope path ${cleaned}: ~ expansion is not supported`, 1);
-  }
-  if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(cleaned)) {
-    throw new CliError(`invalid runner scope path ${cleaned}: URLs or schemes are not supported`, 1);
-  }
-  if (/[,;*?\[\]{}]/.test(cleaned)) {
-    throw new CliError(`invalid runner scope path ${cleaned}: globs, wildcards, or list punctuation are not supported`, 1);
-  }
-  if (cleaned.split("/").includes("..")) {
-    throw new CliError(`invalid runner scope path ${cleaned}: .. escapes are not supported`, 1);
-  }
-  if (!cleaned || cleaned === "." || cleaned === "./") return ".";
-
-  const root = path.resolve(cwd);
-  const absolute = path.isAbsolute(cleaned) ? path.resolve(cleaned) : path.resolve(root, cleaned);
-  const relative = path.relative(root, absolute).replace(/\\/g, "/");
-  if (!relative || relative === ".") return ".";
-  if (relative.startsWith("../") || relative === ".." || path.isAbsolute(relative)) {
-    throw new CliError(`invalid runner scope path ${cleaned}: absolute paths must resolve inside target cwd`, 1);
-  }
-  return relative;
-}
-
-function isPathAllowedByScope(changedPath, prefixes) {
-  if (prefixes.includes(".")) return true;
-  const normalized = changedPath.replace(/\\/g, "/");
-  return prefixes.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`));
-}
-
 function renderAssignmentPacket(packet) {
   return `### ${packet.timestamp} ${packet.role} ${packet.taskId}
 
@@ -2056,7 +1719,7 @@ function renderOrchestrationSkeleton(packet) {
 - assignment: ${packet.assignment}
 - expected_output: ${packet.expectedOutput}
 - spawned: false
-- next: hand this assignment packet to an available subagent mechanism outside this MVP CLI
+- next: dispatch this assignment only through the official Codex subagent spawn tools exposed to the parent
 ${renderFeatureProfilePacketGuidance(packet)}
 - nested_coding_agents_preflight: ${NESTED_CODING_AGENTS_PREFLIGHT}
 - debugging_integrity: ${DEBUG_INTEGRITY}
@@ -2067,39 +1730,6 @@ ${renderMetacognitiveGatePacketSchema(packet.metacognitiveGate)}
 - lifecycle: ${CHILD_RETURN_LIFECYCLE} ${SUBAGENT_LIFECYCLE}`;
 }
 
-function renderRunnerResult(result) {
-  return `### ${result.timestamp} ${result.role} ${result.taskId}
-
-- type: ${result.type}
-- role: ${result.role}
-- status: ${result.status}
-- task_id: ${result.taskId}
-- epoch: ${result.epoch}
-- scope: ${result.scope}
-- feature_profile: ${featureProfileId(result)}
-- work_type: ${workTypeId(result)}
-- invocation_cwd: ${result.invocationCwd}
-- target_cwd: ${result.targetCwd}
-- runner: ${result.runner}
-- spawned: ${result.spawned}
-- exit_code: ${formatExitCode(result.exitCode)}
-- signal: ${result.signal}
-- timeout_ms: ${result.timeoutMs}
-- assignment: ${result.assignment}
-- expected_output: ${result.expectedOutput}
-- summary: ${result.summary || "none"}
-- ${FINALIZATION_REFERENCES_FIELD}: ${result.finalizationReferences || "none"}
-- failure: ${result.failure}
-- debugging_integrity: ${DEBUG_INTEGRITY}
-${renderCodingConductFields()}
-${renderSupervisionFields(result)}
-${renderMetacognitiveGatePacketSchema(result.metacognitiveGate)}
-${renderMetacognitiveResultFields(result.metacognitiveGate, "missing from runner result", result.metacognitiveFields, {
-  includeAll: result.status === "completed",
-})}
-- lifecycle: ${renderRunnerLifecycle(result)}`;
-}
-
 function appendRunnerEntry(commandContext, heading, entry) {
   const state = resolveWorkflowState(commandContext.targetCwd);
   prepareStateWrite(state);
@@ -2107,7 +1737,8 @@ function appendRunnerEntry(commandContext, heading, entry) {
   const runnerPath = path.join(state.stateDir, RUNNER_FILE);
   const initial = `# Coding Agents Runner
 
-This file records CLI-issued assignments, worker-result collections, task-finalization packets, process-orchestration skeletons, and process runner results. Legacy parent-integration packets remain readable for backward validation.
+This file records CLI-issued assignments, worker-result collections, task-finalization packets, and process-orchestration skeletons. Historical process-runner-result and parent-integration packets remain readable for backward validation.
+The CLI never launches Codex workers or OS child-agent processes. Dispatch is owned by the official Codex subagent spawn tools exposed to the parent.
 Collected results record workflow-state disposition only. The workflow CLI does not interrupt, close, or reclaim runtime threads.
 ${NESTED_CODING_AGENTS_PREFLIGHT}
 ${renderSupervisionFields()}
@@ -3312,13 +2943,6 @@ function renderContractCoverageResultFields(packet) {
 - source_spec_coverage: ${packet.sourceSpecCoverage || "not provided"}`;
 }
 
-function renderRunnerPromptContractCoverageGate(_packet) {
-  return `
-${CONTRACT_COVERAGE_GATE_NAME}:
-- contract_coverage_owner: parent finalize
-- ${WORKER_FINALIZATION_REFERENCE_PROMPT}`;
-}
-
 function renderSupervisionSection() {
   return `## ${SUPERVISION_CONTRACT_NAME}
 
@@ -3374,21 +2998,6 @@ function renderMetacognitiveResultFields(gate, placeholder, values = {}, options
   return lines.join("\n");
 }
 
-function renderRunnerPromptMetacognitiveGate(packet) {
-  if (!packet.metacognitiveGate?.required) return "";
-  return `
-${METACOGNITIVE_GATE_NAME}:
-- metacognitive_gate_required: true
-- metacognitive_gate_triggers: ${formatTriggers(packet.metacognitiveGate)}
-- ${METACOGNITIVE_GATE_CONTRACT}
-- A completed result must fill every field listed in the return sections below. Blocked or unresolved work must name the blocker and next_investigation.`;
-}
-
-function renderMetacognitiveReturnSections(packet) {
-  if (!packet.metacognitiveGate?.required) return "";
-  return METACOGNITIVE_GATE_FIELDS.map((field) => `- ${field}:`).join("\n");
-}
-
 function formatTriggers(gate) {
   return gate?.triggers?.length ? gate.triggers.join(", ") : "none";
 }
@@ -3403,13 +3012,6 @@ function splitList(value) {
 
 function packetLabel(section) {
   return section.split("\n")[0].replace(/^### /, "");
-}
-
-function renderRunnerLifecycle(result) {
-  if (result.status === "completed") {
-    return "Parent integrates the completed result, then collect records state_retired or continuation_expected. Process exit is not runtime-thread closure evidence.";
-  }
-  return "Parent records the failure, timeout, or blocker, then collect records workflow-state disposition. The workflow CLI does not close or reclaim runtime threads.";
 }
 
 function upsertGenerated(filePath, body) {
@@ -3720,14 +3322,6 @@ function renderFeatureProfilePacketGuidance(packet) {
   return `- feature_profile_guidance: ${FEATURE_PROFILE_GUIDANCE[id]} This feature profile is an optional assignment overlay, not a resident agent or spawned worker.`;
 }
 
-function renderFeatureProfilePromptGuidance(packet) {
-  const id = featureProfileId(packet);
-  if (id === DEFAULT_FEATURE_PROFILE) {
-    return "feature_profile is none; use only the role, task_id, epoch, and scope guidance for this assignment.";
-  }
-  return `feature_profile ${id}: ${FEATURE_PROFILE_GUIDANCE[id]} This is an optional assignment overlay, not a resident agent or spawned worker.`;
-}
-
 function readGitStatus(cwd) {
   try {
     const output = execFileSync("git", ["-C", cwd, "status", "--short"], {
@@ -3738,40 +3332,6 @@ function readGitStatus(cwd) {
   } catch (error) {
     return { ok: false, error: String(error.stderr || error.message).trim() };
   }
-}
-
-function readGitChangedPaths(cwd) {
-  try {
-    const output = execFileSync("git", ["-C", cwd, "status", "--porcelain=v1", "-z", "--untracked-files=all"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    return parsePorcelainZPaths(output).sort();
-  } catch {
-    return [];
-  }
-}
-
-function parsePorcelainZPaths(output) {
-  const records = output.split("\0").filter(Boolean);
-  const paths = [];
-  for (let index = 0; index < records.length; index += 1) {
-    const record = records[index];
-    if (record.length < 4) continue;
-    const status = record.slice(0, 2);
-    const statusPath = normalizePorcelainPath(record.slice(3));
-    if (statusPath) paths.push(statusPath);
-    if (/[RC]/.test(status)) {
-      const sourcePath = normalizePorcelainPath(records[index + 1] || "");
-      if (sourcePath) paths.push(sourcePath);
-      index += 1;
-    }
-  }
-  return [...new Set(paths)];
-}
-
-function normalizePorcelainPath(pathPart) {
-  return pathPart.replace(/\\/g, "/");
 }
 
 function summarizeGit(output) {
@@ -3788,7 +3348,7 @@ Usage:
   node bin/coding-agents.mjs assign [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] [--hierarchy-mode none|one_level|n_level] [--max-depth <n>] [--depth <n>] [--remaining-depth <n>] [--heartbeat-interval <ISO-8601 duration>] [--heartbeat-deadline <ISO-8601 duration>] [--max-silence <ISO-8601 duration>] [--soft-timeout <ISO-8601 duration>] [--hard-timeout <ISO-8601 duration>] [--no-interrupt-until <ISO-8601 duration>] --assignment <text> --expected-output <text>
   node bin/coding-agents.mjs collect [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] --status <status> --lifecycle-disposition state_retired|continuation_expected [--cancel-reason <allowed-reason>] [--findings <text>] [--changed-files <text>] [--verification <text>] [--blockers <text>] [--assumptions <text>] [--next <text>] [--finalization-references <typed-refs>] [--expected-outcome <text>] [--actual-result <text>] [--reproduction-or-evidence <text>] [--failure-point <text>] [--hypothesis-branches <text>] [--source-of-truth-boundary <text>] [--plugin-contract-boundary <text>] [--generated-artifact-boundary <text>] [--before-context-effects <text>] [--after-context-effects <text>] [--cross-feature-consequences <text>] [--root-cause <text>] [--fix-summary <text>] [--verification-evidence <text>] [--skipped-checks <text>] [--unresolved-risks <text>] [--next-investigation <text>]
   node bin/coding-agents.mjs finalize [--cwd <path>] [--target-cwd <path>] --task-id <id> --epoch <epoch> --scope <scope> [--work-type <id>] [--contract-coverage required] --decision-coverage <text> --completion-coverage <text> --source-spec-coverage <text>
-  node bin/coding-agents.mjs run|orchestrate [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] [--hierarchy-mode none|one_level|n_level] [--max-depth <n>] [--depth <n>] [--remaining-depth <n>] [--heartbeat-interval <ISO-8601 duration>] [--heartbeat-deadline <ISO-8601 duration>] [--max-silence <ISO-8601 duration>] [--soft-timeout <ISO-8601 duration>] [--hard-timeout <ISO-8601 duration>] [--no-interrupt-until <ISO-8601 duration>] --assignment <text> --expected-output <text> [--runner codex-cli] [--timeout-ms <ms>]
+  node bin/coding-agents.mjs run|orchestrate [--cwd <path>] [--target-cwd <path>] --role <role> --task-id <id> --epoch <epoch> --scope <scope> [--feature-profile <id>] [--work-type <id>] [--hierarchy-mode none|one_level|n_level] [--max-depth <n>] [--depth <n>] [--remaining-depth <n>] [--heartbeat-interval <ISO-8601 duration>] [--heartbeat-deadline <ISO-8601 duration>] [--max-silence <ISO-8601 duration>] [--soft-timeout <ISO-8601 duration>] [--hard-timeout <ISO-8601 duration>] [--no-interrupt-until <ISO-8601 duration>] --assignment <text> --expected-output <text>
   node bin/coding-agents.mjs verify-assignments [--cwd <path>] [--target-cwd <path>]
   node bin/coding-agents.mjs normalize-debugging-integrity [--cwd <path>] [--target-cwd <path>] [--execute]
   node bin/coding-agents.mjs handoff [--cwd <path>] [--target-cwd <path>] --task-id <id>
@@ -3801,7 +3361,7 @@ Commands:
   collect  Record a worker-result-collection packet and its workflow-state-only lifecycle disposition. Completed collection does not require task-wide D/C/source-spec coverage. state_retired requires exactly one allowed --cancel-reason; continuation_expected rejects --cancel-reason.
   finalize Validate complete active D/C/source-spec coverage and record a distinct task-finalization packet. Every ID segment and source_spec_coverage requires one accepted typed reference.
   run/orchestrate
-           Record an assignment and orchestration skeleton by default; with --runner codex-cli, spawn codex exec and record normalized results.
+           Record an assignment and orchestration skeleton only. Actual worker dispatch uses the official Codex subagent spawn tools outside this CLI.
   verify-assignments
            Block missing or empty task_id, epoch, scope, lifecycle, supervision, coding conduct, or debugging_integrity fields in assignments and modern runner packets.
   normalize-debugging-integrity
@@ -3814,24 +3374,22 @@ State:
   Commands that read or write workflow state resolve state from the target/jobsite cwd and fail when no target Git root is available.
   When both --cwd and --target-cwd are omitted, process cwd is both invocation cwd and target/jobsite cwd.
   Without --target-cwd, --cwd remains the target/jobsite cwd for backwards compatibility.
-  With --target-cwd, --cwd records the invocation cwd (or process cwd when omitted) while state and runner execution use --target-cwd.
+  With --target-cwd, --cwd records the invocation cwd (or process cwd when omitted) while workflow state uses --target-cwd.
   Existing docs/codex directories are migration input or hints only; they are never operational state fallback or write targets.
   State writes add .coding-agents/ to .git/info/exclude; .gitignore is not edited.
   Generated assignments, handoff prompts, and runner packets carry workflow-state lifecycle, supervision, coding conduct, and debugging integrity rules.
   Current task state and modern worker-result-collection packets record lifecycle_contract_version=${LIFECYCLE_CONTRACT_VERSION}. Modern collection packets also record lifecycle_scope=workflow_state_only, lifecycle_disposition, cancel_reason, runtime_thread_disposition=unmanaged_by_workflow_cli, and runtime_changed=false.
   Fieldless current packets are invalid. unknown_legacy is accepted only for pre-contract workflow state or non-current packets that predate the recorded lifecycle contract activation time; validation does not synthesize retirement.
   --runtime-thread-closed is rejected globally for every command. The workflow CLI never emits or accepts runtime_thread_closed=true. Interruption and process exit are not runtime-thread closure evidence.
-  Parent-managed child-worker prompts also suppress nested Coding Agents preflight; child workers do not ask \`coding-agents を使いますか？ [Y/n]\` or start independent nested Coding Agents workflows inside an assigned task_id/epoch/scope. Descendant delegation is allowed only when finite hierarchy fields grant remaining_depth > 0 and inherited supervision is preserved.
+  Parent-managed assignment and handoff material also suppress nested Coding Agents preflight; child workers do not ask \`coding-agents を使いますか？ [Y/n]\` or start independent nested Coding Agents workflows inside an assigned task_id/epoch/scope. Descendant delegation is allowed only when finite hierarchy fields grant remaining_depth > 0 and inherited supervision is preserved.
   Supervision treats silence before heartbeat deadline as neutral, forbids cancel/interruption/workflow state_retired/replacement of quiet workers during the no-interrupt window, requires workers that are still running at heartbeat_interval to self-report completed/current/blocker/ETA progress, treats explicit completed/blocked/failed results as immediate collect/integrate triggers rather than silence, treats heartbeat as telemetry rather than completion evidence, requires explicit state_retired reasons (${SUPERVISION_RETIRE_CANCEL_REASONS.join(", ")}), and uses missed heartbeat -> soft ping/status request -> grace wait -> stale mark before cancel/replace.
   Optional --feature-profile overlays provide scoped assignment guidance only. Known ids: ${knownFeatureProfileIds().join(", ")}.
   Optional --work-type is semantic command metadata. Known ids: ${knownWorkTypeIds().join(", ")}.
   --work-type auto preserves keyword/path inference. --work-type source-change and --work-type debug force the metacognitive gate for that command.
   --work-type documentation suppresses keyword/path gate inference for that command only; it does not replace debug/root-cause gates and cannot downgrade existing gate-required workflow state.
   Optional hierarchy and supervision timing flags are packet metadata. Defaults: hierarchy_mode none, max_depth/depth/remaining_depth 0, heartbeat_interval PT15M, heartbeat_deadline PT30M, max_silence PT45M, soft_timeout PT60M, hard_timeout PT120M, and no_interrupt_until PT30M.
-  With --runner codex-cli, --scope must be machine-checkable before runner.md is appended or the process launches.
-  Runner machine scope grammar is "scope:v1 all" for the whole repo, or "scope:v1 paths=README.md,bin/coding-agents.mjs,tests/" for comma-separated repo-relative prefixes.
-  Absolute paths in "scope:v1 paths=" are accepted only when they resolve inside the target cwd and are normalized to repo-relative prefixes.
-  Legacy runner scopes remain available only for simple path-only values such as "README.md", "allowed/", "bin/coding-agents.mjs tests/workflow-state.test.mjs", ".", "repo", and "whole repo".
+  --runner and --timeout-ms are rejected globally. This CLI never launches Codex workers or OS child-agent processes; use the official Codex subagent spawn tools.
+  Historical process-runner-result packets remain readable for backward validation but cannot be emitted by current commands.
   ${CODING_CONDUCT_GATE_NAME}: ${CODING_CONDUCT_CONTRACT}
   Debug or repair work must identify root cause and verify the intended outcome; log-only, fallback-only, skip-only, failure-output-only, or return-to-main-loop-only changes are not completion.
   Gate-required source-change/debug/repair/source-of-truth/plugin-contract/generated-artifact inconsistency work also carries ${METACOGNITIVE_GATE_NAME} fields and rejects completed worker collection without them.
@@ -3994,26 +3552,8 @@ function singleLine(value) {
   return String(value).replace(/\s+/g, " ").trim();
 }
 
-function summarizeRunnerOutput(value) {
-  const text = singleLine(value || "none");
-  if (text.length <= 600) return text;
-  return `${text.slice(0, 597)}...`;
-}
-
-function formatExitCode(value) {
-  return typeof value === "number" ? String(value) : "none";
-}
-
 function ensureTrailingNewline(value) {
   return value.endsWith("\n") ? value : `${value}\n`;
-}
-
-function parsePositiveInt(value, flag) {
-  const parsed = Number.parseInt(String(value), 10);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    throw new CliError(`invalid ${flag}: expected positive integer`, 1);
-  }
-  return parsed;
 }
 
 class CliError extends Error {

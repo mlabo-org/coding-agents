@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,7 +50,7 @@ const META_ARGS = [
   "--unresolved-risks",
   "No unresolved risks observed after targeted verification in temp repos.",
   "--next-investigation",
-  "Monitor future runner-result normalization if codex-cli output format changes.",
+  "Monitor future official subagent result collection contract changes.",
 ];
 
 function contractCoverageArgs(taskId) {
@@ -894,59 +894,6 @@ test("assign and run skeletons carry the metacognitive gate for gate-required wo
     assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
   } finally {
     rmSync(repo, { recursive: true, force: true });
-  }
-});
-
-test("run runner results reject completed metacognitive packets with low-information evidence", () => {
-  const repo = makeTempGitRepo();
-  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
-  try {
-    intakeGateRequired(repo, "meta-run-result");
-    const fakeCodex = path.join(fakeBin, "codex");
-    writeFileSync(fakeCodex, `#!/usr/bin/env node
-const { writeFileSync } = require("node:fs");
-const args = process.argv.slice(2);
-const outputIndex = args.indexOf("--output-last-message");
-if (outputIndex !== -1) writeFileSync(args[outputIndex + 1], ${JSON.stringify(metacognitiveResultText("done"))}, "utf8");
-process.stdout.write("fake codex completed\\n");
-`, "utf8");
-    chmodSync(fakeCodex, 0o755);
-
-    const run = runCli([
-      "run",
-      "--target-cwd",
-      repo,
-      "--role",
-      "Implementer",
-      "--task-id",
-      "meta-run-result",
-      "--epoch",
-      "e1",
-      "--scope",
-      "bin/coding-agents.mjs",
-      "--assignment",
-      "repair source-of-truth contract drift",
-      "--expected-output",
-      "metacognitive evidence packet",
-      "--runner",
-      "codex-cli",
-    ], {
-      env: {
-        ...process.env,
-        PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}`,
-      },
-    });
-
-    assert.notEqual(run.status, 0);
-    assert.match(run.stderr, /completed runner result missing metacognitive gate fields/);
-    const runner = readState(repo, "runner.md");
-    assert.match(runner, /type: process-runner-result/);
-    assert.match(runner, /status: failed/);
-    assert.match(runner, /failure: completed runner result missing metacognitive gate fields: .*expected_outcome/);
-    assert.match(runner, /expected_outcome: done/);
-  } finally {
-    rmSync(repo, { recursive: true, force: true });
-    rmSync(fakeBin, { recursive: true, force: true });
   }
 });
 

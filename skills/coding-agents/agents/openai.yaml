@@ -1,0 +1,7 @@
+interface:
+  display_name: Coding Agents
+  short_description: Explicit-only Coding Agents state and CLI workflow
+  default_prompt: Use $coding-agents only when explicitly named or continuing, auditing, or repairing .coding-agents state or its source CLI. Dispatch actual workers only through official Codex subagent spawn tools; never use a CLI runner.
+
+policy:
+  allow_implicit_invocation: false

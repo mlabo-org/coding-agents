@@ -1,7 +1,7 @@
 {
   "name": "coding-agents",
   "version": "0.1.0",
-  "description": "Coding Agents explicit-only legacy workflow for its source CLI and existing .coding-agents state. Select only when the user names Coding Agents/coding-agents or asks to continue, audit, or repair that state or CLI. Primary route: explicit Coding Agents workflow. Fallback: normal coding/subagent tools for generic coding, debug, source changes, delegation, and subagent coordination.",
+  "description": "Coding Agents explicit-only legacy workflow for named .coding-agents state and source CLI continuation, audit, or repair. Primary route: explicit Coding Agents workflow with worker dispatch only through official Codex subagent spawn tools. Fallback: parent-side work when official subagents are unavailable; never launch codex exec or a custom process runner. Do not auto-route generic coding, debug, source changes, delegation, or subagent coordination.",
   "skills": "./skills/",
   "keywords": [
     "coding-agents",
@@ -14,8 +14,8 @@
   ],
   "interface": {
     "displayName": "Coding Agents",
-    "shortDescription": "Explicit-only legacy Coding Agents workflow for named use or existing .coding-agents state/CLI continuation, audit, or repair.",
-    "longDescription": "Discovery is intentionally explicit-only. Select only when the user names Coding Agents/coding-agents or asks to continue, audit, or repair existing .coding-agents state or the Coding Agents source CLI. Do not auto-route generic coding, debugging or repair, source changes, delegation, multi-agent work, or subagent coordination. Once explicitly selected, the existing intake, assign, collect, finalize, run, orchestrate, handoff, and audit CLI functionality remains unchanged.",
+    "shortDescription": "Explicit-only legacy Coding Agents state/CLI workflow; official Codex spawn only for worker dispatch.",
+    "longDescription": "Discovery is intentionally explicit-only. Select only when the user names Coding Agents/coding-agents or asks to continue, audit, or repair existing .coding-agents state or the Coding Agents source CLI. Do not auto-route generic coding, debugging or repair, source changes, delegation, multi-agent work, or subagent coordination. Intake, assign, collect, finalize, handoff, audit, and record-only run/orchestrate remain available. Actual workers are dispatched only through official Codex subagent spawn tools; the CLI never launches codex exec, an OS child Codex worker, or a custom runner fallback.",
     "developerName": "suzukimakoto",
     "category": "Productivity",
     "capabilities": [
@@ -26,7 +26,8 @@
     ],
     "defaultPrompt": [
       "Use Coding Agents explicitly because I named Coding Agents/coding-agents.",
-      "Continue, audit, or repair this existing .coding-agents state or Coding Agents source CLI."
+      "Continue, audit, or repair this existing .coding-agents state or Coding Agents source CLI.",
+      "In Coding Agents, dispatch workers only through official Codex subagent spawn tools; never use a CLI process runner."
     ],
     "brandColor": "#2563EB"
   },

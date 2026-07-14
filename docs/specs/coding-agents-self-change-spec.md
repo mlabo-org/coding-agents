@@ -32,13 +32,18 @@ Items 1-10 are Coding Agents self changes. Item 11 is external legacy cleanup.
 
 3. Conditional runner log
    - `runner.md` is an operational log, not a universal required source document.
-   - Create or update it only when runner, assignment dispatch, worker-result
-     collection, task-finalization, or process-result activity actually occurs.
-   - Existing legacy `parent-integration` packets remain readable for backward
-     validation; new commands do not emit that legacy packet type.
+   - Create or update it only when assignment, worker-result collection,
+     task-finalization, or record-only orchestration activity actually occurs.
+   - Existing historical `process-runner-result` and legacy
+     `parent-integration` packets remain readable for backward validation.
+     Current commands do not emit either historical packet type.
    - Do not require `runner.md` for unrelated intake/spec/documentation flows.
 
 4. Subagent workflow-state lifecycle
+   - Dispatch actual workers only through the official Codex subagent spawn
+     tools exposed in the current session. The source CLI must never launch
+     `codex exec`, an OS child Codex worker, or a custom runner fallback.
+     When official subagent tools are unavailable, work remains parent-side.
    - Subagents must return concise worker-result material and must not stay
      open waiting for more work after returning it.
    - `collect` requires `--lifecycle-disposition state_retired` or
@@ -59,7 +64,7 @@ Items 1-10 are Coding Agents self changes. Item 11 is external legacy cleanup.
      non-current packets that predate the recorded activation time remain
      `unknown_legacy`; normalization and validation must not synthesize a
      retirement decision for them.
-   - Generated assignments, runner prompts, runner packets, and handoff material
+   - Generated assignments, runner packets, and handoff material
      must carry this lifecycle rule so future job state preserves it.
 
 5. Subagent supervision and finite delegation depth
@@ -109,7 +114,7 @@ Items 1-10 are Coding Agents self changes. Item 11 is external legacy cleanup.
      repair route. A user-explicit temporary containment may be recorded only as
      containment, with unresolved root cause, failing main flow, residual risk,
      and removal condition visible.
-   - Generated assignments, runner prompts, runner packets, audit material, and
+   - Generated assignments, runner packets, audit material, and
      handoff material must carry this debugging integrity rule so delegated work
      preserves it.
    - Existing `.coding-agents` state that predates this rule is stale when
@@ -142,7 +147,7 @@ Items 1-10 are Coding Agents self changes. Item 11 is external legacy cleanup.
 
 8. Coding Conduct Gate
    - Coding and debug work must carry a machine-visible Coding Conduct Gate in
-     generated assignments, runner prompts, runner packets, handoff material,
+     generated assignments, runner packets, handoff material,
      and validation for modern workflow state.
    - If a mature open-source solution exists on GitHub or npm and fits the
      requirement, Coding Agents must reuse it directly instead of
@@ -171,7 +176,7 @@ Items 1-10 are Coding Agents self changes. Item 11 is external legacy cleanup.
      require complete task-wide D-*/C-*/source-spec coverage, and multiple
      worker results may be collected before the task is finalized.
    - A collection may carry `finalization_references` relevant to that worker's
-     result. Generated assignment and runner prompts ask workers for concise
+     result. Generated assignments and handoff material ask workers for concise
      typed references, while the parent owns the complete task-wide map.
    - `finalize` is the only command that records a modern
      `task-finalization` packet. It requires the current `task_id`, `epoch`, and
@@ -195,7 +200,7 @@ Items 1-10 are Coding Agents self changes. Item 11 is external legacy cleanup.
 10. Nested Coding Agents preflight suppression
    - Parent-managed child workers operate under a Coding Agents assignment that
      the parent already selected.
-   - Generated assignments, runner prompts, runner packets, and handoff material
+   - Generated assignments, runner packets, and handoff material
      must tell child workers not to ask `coding-agents を使いますか？ [Y/n]` and
      not to start independent nested Coding Agents workflows inside the assigned
      `task_id`/`epoch`/`scope`.
@@ -232,6 +237,9 @@ Items 1-10 are Coding Agents self changes. Item 11 is external legacy cleanup.
 Future implementation work should preserve this split:
 
 - Source self-change work may update the Coding Agents source repository.
+- Actual worker dispatch uses only official Codex subagent spawn tools. The
+  Coding Agents CLI remains a workflow-state recorder and validator; it never
+  launches `codex exec` or substitutes a custom child-process runner.
 - Cross-repo source invocation must keep source/cache files separate from the
   target repository's generated `.coding-agents/` state. Running the source CLI
   from the plugin repository does not make the plugin repository the state owner

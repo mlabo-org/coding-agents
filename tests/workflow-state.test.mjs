@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1075,101 +1075,86 @@ test("valid feature profile renders in assignment, collect, and run skeleton pac
   }
 });
 
-test("codex-cli runner prompt and result carry the feature profile overlay", () => {
+test("external process runner flags are rejected while run remains record-only", () => {
   const repo = makeTempGitRepo();
-  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
   try {
-    intake(repo, { taskId: "profile-runner", epoch: "e1", scope: "README.md" });
-    const fakeCodex = path.join(fakeBin, "codex");
-    writeFileSync(fakeCodex, `#!/usr/bin/env node
-const { writeFileSync } = require("node:fs");
-const args = process.argv.slice(2);
-const prompt = args[args.length - 1] || "";
-if (!prompt.includes("feature_profile: runner.scope-guard")) process.exit(7);
-if (!prompt.includes("optional assignment overlay, not a resident agent or spawned worker")) process.exit(8);
-if (!prompt.includes("Silence before heartbeat deadline is neutral, not failure")) process.exit(9);
-if (!prompt.includes("Parent must not cancel or interrupt a quiet worker, mark its workflow state_retired, or replace it during the no-interrupt window")) process.exit(10);
-if (!prompt.includes("Explicit completed, blocked, or failed results are not silence; collect and integrate them immediately")) process.exit(15);
-if (!prompt.includes("If still running at heartbeat_interval, self-report progress with fields completed/current/blocker/ETA; use blocker: none and ETA: unknown when unknown.")) process.exit(16);
-if (!prompt.includes("Reuse mature GitHub/npm OSS directly")) process.exit(17);
-if (!prompt.includes("Start bug analysis from first principles")) process.exit(18);
-if (!prompt.includes("Do not add fallback implementations that hide main-flow errors")) process.exit(19);
-if (!prompt.includes("missed heartbeat -> soft ping/status request -> grace wait -> stale mark")) process.exit(11);
-if (!prompt.includes("hierarchy_mode: none")) process.exit(12);
-if (!prompt.includes("heartbeat_interval: PT15M")) process.exit(13);
-if (!prompt.includes("cancel_reason_required: true")) process.exit(14);
-if (!prompt.includes("Return concise typed references relevant to this worker result for parent finalization")) process.exit(20);
-if (!prompt.includes("- finalization_references:")) process.exit(21);
-if (prompt.includes("A completed result must map every D-* accepted decision")) process.exit(22);
-const outputIndex = args.indexOf("--output-last-message");
-if (outputIndex !== -1) writeFileSync(args[outputIndex + 1], "runner prompt included feature_profile: runner.scope-guard and supervision\\n", "utf8");
-process.stdout.write("fake codex completed\\n");
-`, "utf8");
-    chmodSync(fakeCodex, 0o755);
+    intake(repo, { taskId: "official-spawn-only", epoch: "e1", scope: "README.md" });
 
-    const run = runCli([
-      "run",
-      "--target-cwd",
-      repo,
-      "--role",
-      "Test Runner",
-      "--task-id",
-      "profile-runner",
-      "--epoch",
-      "e1",
-      "--scope",
-      "README.md",
-      "--feature-profile",
-      "runner.scope-guard",
-      "--assignment",
-      "verify the prompt carries the feature profile",
-      "--expected-output",
-      "runner result",
-      "--runner",
-      "codex-cli",
-    ], {
-      env: {
-        ...process.env,
-        PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}`,
-      },
-    });
+    for (const forbiddenArgs of [
+      ["--runner", "codex-cli"],
+      ["--timeout-ms", "1000"],
+    ]) {
+      const rejected = runCli([
+        "run",
+        "--target-cwd",
+        repo,
+        "--role",
+        "Implementer",
+        "--task-id",
+        "official-spawn-only",
+        "--epoch",
+        "e1",
+        "--scope",
+        "README.md",
+        "--assignment",
+        "record a bounded assignment",
+        "--expected-output",
+        "assignment and orchestration skeleton",
+        ...forbiddenArgs,
+      ]);
+      assert.notEqual(rejected.status, 0);
+      assert.match(rejected.stderr, /this CLI never launches Codex workers; use the official Codex subagent spawn tools/);
+      assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
+    }
 
-    assert.equal(run.status, 0, run.stderr);
-    assert.match(run.stdout, /ok feature_profile: runner\.scope-guard/);
-    const runner = readState(repo, "runner.md");
-    assert.match(runner, /type: assignment[\s\S]*feature_profile: runner\.scope-guard/);
-    assert.match(runner, /type: process-runner-result[\s\S]*feature_profile: runner\.scope-guard/);
-    assert.match(runner, /type: process-runner-result[\s\S]*supervision_contract: Subagent Supervision Contract/);
-    assert.match(runner, /type: process-runner-result[\s\S]*hierarchy_mode: none/);
-    assert.match(runner, /type: process-runner-result[\s\S]*hard_timeout: PT120M/);
-    assert.match(runner, /summary: runner prompt included feature_profile: runner\.scope-guard and supervision/);
-  } finally {
-    rmSync(repo, { recursive: true, force: true });
-    rmSync(fakeBin, { recursive: true, force: true });
-  }
-});
-
-test("verify rejects completed codex-cli runner results until worker result is collected", () => {
-  const repo = makeTempGitRepo();
-  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
-  try {
-    intake(repo, {
-      task: "Probe uncollected completed runner result",
-      taskId: "uncollected-runner",
-      epoch: "e1",
-      scope: "README.md",
-      workType: "documentation",
-    });
-    installFakeCodex(fakeBin, "runner produced parent integration material\\n");
-
-    const run = runCli([
+    const recorded = runCli([
       "run",
       "--target-cwd",
       repo,
       "--role",
       "Implementer",
       "--task-id",
-      "uncollected-runner",
+      "official-spawn-only",
+      "--epoch",
+      "e1",
+      "--scope",
+      "README.md",
+      "--assignment",
+      "record a bounded assignment",
+      "--expected-output",
+      "assignment and orchestration skeleton",
+    ]);
+    assert.equal(recorded.status, 0, recorded.stderr);
+    assert.match(recorded.stdout, /ok spawned: false/);
+    assert.match(recorded.stdout, /record-only; dispatch subagents through the official Codex spawn tools/);
+
+    const runner = readState(repo, "runner.md");
+    assert.match(runner, /type: assignment/);
+    assert.match(runner, /type: process-orchestration-skeleton/);
+    assert.doesNotMatch(runner, /type: process-runner-result/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("historical completed process-runner results remain readable and require collection", () => {
+  const repo = makeTempGitRepo();
+  try {
+    intake(repo, {
+      task: "Preserve historical process result validation",
+      taskId: "historical-runner-result",
+      epoch: "e1",
+      scope: "README.md",
+      workType: "documentation",
+    });
+    const recorded = runCli([
+      "run",
+      "--target-cwd",
+      repo,
+      "--role",
+      "Implementer",
+      "--task-id",
+      "historical-runner-result",
       "--epoch",
       "e1",
       "--scope",
@@ -1177,32 +1162,41 @@ test("verify rejects completed codex-cli runner results until worker result is c
       "--work-type",
       "documentation",
       "--assignment",
-      "complete the documentation task",
+      "record a documentation assignment",
       "--expected-output",
-      "parent integration material",
-      "--runner",
-      "codex-cli",
-    ], {
-      env: pathWithFakeCodex(fakeBin),
-    });
+      "workflow-state packet",
+    ]);
+    assert.equal(recorded.status, 0, recorded.stderr);
 
-    assert.equal(run.status, 0, run.stderr);
-    let runner = readState(repo, "runner.md");
-    assert.match(runner, /type: process-runner-result[\s\S]*status: completed/);
-    assert.doesNotMatch(runner, /type: parent-integration/);
+    const runnerPath = path.join(repo, ".coding-agents", "runner.md");
+    const runner = readFileSync(runnerPath, "utf8");
+    const assignment = runner.match(/## Issued Assignments\n\n(### [\s\S]*?)(?=\n## Process Orchestration Skeletons)/)?.[1];
+    assert.ok(assignment, "record-only run must emit an assignment packet");
+    const historicalResult = assignment
+      .replace("- type: assignment", "- type: process-runner-result")
+      .replace("- status: assigned", "- status: completed")
+      .replace(
+        /- lifecycle: /,
+        "- runner: codex-cli\n- spawned: true\n- exit_code: 0\n- summary: historical completed process result\n- failure: none\n- lifecycle: ",
+      );
+    writeFileSync(
+      runnerPath,
+      `${runner.trimEnd()}\n\n## Historical Process Runner Results\n\n${historicalResult.trim()}\n`,
+      "utf8",
+    );
 
     const uncollected = runCli(["verify-assignments", "--target-cwd", repo]);
     assert.notEqual(uncollected.status, 0);
     assert.match(uncollected.stdout, /uncollected completed runner result missing follow-up worker result collection/);
 
-    const collect = runCli([
+    const collected = runCli([
       "collect",
       "--target-cwd",
       repo,
       "--role",
       "Implementer",
       "--task-id",
-      "uncollected-runner",
+      "historical-runner-result",
       "--epoch",
       "e1",
       "--scope",
@@ -1216,22 +1210,17 @@ test("verify rejects completed codex-cli runner results until worker result is c
       "--cancel-reason",
       "completed_retire",
       "--findings",
-      "runner result was collected",
+      "historical result collected",
       "--verification",
-      "parent integration recorded",
+      "backward validation completed",
       "--next",
-      "record completed workflow state_retired",
-      ...contractCoverageArgs("uncollected-runner"),
+      "parent final verification",
     ]);
-    assert.equal(collect.status, 0, collect.stderr);
-
-    runner = readState(repo, "runner.md");
-    assert.match(runner, /type: worker-result-collection[\s\S]*status: completed/);
+    assert.equal(collected.status, 0, collected.stderr);
     assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);
-    assert.equal(runCli(["doctor", "--target-cwd", repo]).status, 0);
+    assert.match(readState(repo, "runner.md"), /type: process-runner-result/);
   } finally {
     rmSync(repo, { recursive: true, force: true });
-    rmSync(fakeBin, { recursive: true, force: true });
   }
 });
 
@@ -1462,6 +1451,7 @@ test("legacy runner packets without work_type remain explicitly backwards compat
 
     const verify = runCli(["verify-assignments", "--target-cwd", repo]);
     assert.equal(verify.status, 0, verify.stdout + verify.stderr);
+    assert.match(verify.stdout, /runner packets valid \(3 checked\)/);
     assert.match(verify.stdout, /legacy parent-integration lifecycle preserved as unknown_legacy \(1 checked\)/);
     const doctor = runCli(["doctor", "--target-cwd", repo]);
     assert.equal(doctor.status, 0, doctor.stdout + doctor.stderr);
@@ -1764,623 +1754,6 @@ test("normalize runner metacognitive gate does not accept packet fields as pream
   }
 });
 
-test("codex-cli runner fails when it writes outside the machine-checkable scope", () => {
-  const repo = makeTempGitRepo();
-  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
-  try {
-    intake(repo, { taskId: "runner-scope", epoch: "e1", scope: "allowed.txt" });
-    const fakeCodex = path.join(fakeBin, "codex");
-    writeFileSync(fakeCodex, `#!/usr/bin/env node
-const { writeFileSync } = require("node:fs");
-writeFileSync("outside.txt", "scope drift\\n", "utf8");
-process.stdout.write("fake codex completed\\n");
-`, "utf8");
-    chmodSync(fakeCodex, 0o755);
-
-    const run = runCli([
-      "run",
-      "--target-cwd",
-      repo,
-      "--role",
-      "Implementer",
-      "--task-id",
-      "runner-scope",
-      "--epoch",
-      "e1",
-      "--scope",
-      "allowed.txt",
-      "--assignment",
-      "write only the allowed file",
-      "--expected-output",
-      "runner result",
-      "--runner",
-      "codex-cli",
-    ], {
-      env: {
-        ...process.env,
-        PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}`,
-      },
-    });
-
-    assert.notEqual(run.status, 0);
-    assert.match(run.stderr, /outside scope allowed\.txt/);
-    const runner = readState(repo, "runner.md");
-    assert.match(runner, /type: process-runner-result/);
-    assert.match(runner, /status: failed/);
-    assert.match(runner, /failure: runner changed files outside scope allowed\.txt: outside\.txt/);
-  } finally {
-    rmSync(repo, { recursive: true, force: true });
-    rmSync(fakeBin, { recursive: true, force: true });
-  }
-});
-
-test("codex-cli runner refuses pre-existing dirty paths outside scope before appending or launching", () => {
-  const repo = makeTempGitRepo();
-  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
-  try {
-    intake(repo, { taskId: "runner-predirty", epoch: "e1", scope: "allowed.txt" });
-    writeFileSync(path.join(repo, "outside.txt"), "already dirty\n", "utf8");
-    const fakeCodex = path.join(fakeBin, "codex");
-    writeFileSync(fakeCodex, `#!/usr/bin/env node
-const { writeFileSync } = require("node:fs");
-writeFileSync("launched.txt", "runner launched\\n", "utf8");
-process.stdout.write("fake codex completed\\n");
-`, "utf8");
-    chmodSync(fakeCodex, 0o755);
-
-    const run = runCli([
-      "run",
-      "--target-cwd",
-      repo,
-      "--role",
-      "Implementer",
-      "--task-id",
-      "runner-predirty",
-      "--epoch",
-      "e1",
-      "--scope",
-      "allowed.txt",
-      "--assignment",
-      "write only the allowed file",
-      "--expected-output",
-      "runner result",
-      "--runner",
-      "codex-cli",
-    ], {
-      env: {
-        ...process.env,
-        PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}`,
-      },
-    });
-
-    assert.notEqual(run.status, 0);
-    assert.match(run.stderr, /dirty files outside scope allowed\.txt: outside\.txt/);
-    assert.equal(existsSync(path.join(repo, "launched.txt")), false);
-    assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
-  } finally {
-    rmSync(repo, { recursive: true, force: true });
-    rmSync(fakeBin, { recursive: true, force: true });
-  }
-});
-
-test("codex-cli runner rejects negative prose scope without blocking intake", () => {
-  const repo = makeTempGitRepo();
-  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
-  try {
-    const scope = "allowed.txt except outside.txt";
-    intake(repo, { taskId: "runner-negative-scope", epoch: "e1", scope });
-    const fakeCodex = path.join(fakeBin, "codex");
-    writeFileSync(fakeCodex, `#!/usr/bin/env node
-const { writeFileSync } = require("node:fs");
-writeFileSync("launched.txt", "runner launched\\n", "utf8");
-process.stdout.write("fake codex completed\\n");
-`, "utf8");
-    chmodSync(fakeCodex, 0o755);
-
-    const run = runCli([
-      "run",
-      "--target-cwd",
-      repo,
-      "--role",
-      "Implementer",
-      "--task-id",
-      "runner-negative-scope",
-      "--epoch",
-      "e1",
-      "--scope",
-      scope,
-      "--assignment",
-      "write only the allowed file",
-      "--expected-output",
-      "runner result",
-      "--runner",
-      "codex-cli",
-    ], {
-      env: {
-        ...process.env,
-        PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}`,
-      },
-    });
-
-    assert.notEqual(run.status, 0);
-    assert.match(run.stderr, /negative or exclusion wording is not supported/);
-    assert.equal(existsSync(path.join(repo, "launched.txt")), false);
-    assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
-
-    const assign = runCli([
-      "assign",
-      "--target-cwd",
-      repo,
-      "--role",
-      "Implementer",
-      "--task-id",
-      "runner-negative-scope",
-      "--epoch",
-      "e1",
-      "--scope",
-      scope,
-      "--assignment",
-      "record the prose scope for a human worker",
-      "--expected-output",
-      "assignment packet",
-    ]);
-    assert.equal(assign.status, 0, assign.stderr);
-    assert.match(readState(repo, "runner.md"), /type: assignment/);
-  } finally {
-    rmSync(repo, { recursive: true, force: true });
-    rmSync(fakeBin, { recursive: true, force: true });
-  }
-});
-
-test("codex-cli runner accepts explicit scope:v1 paths grammar", () => {
-  const repo = makeTempGitRepo();
-  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
-  try {
-    const scope = `scope:v1 paths=README.md,${path.join(repo, "bin/coding-agents.mjs")},tests/`;
-    intake(repo, { taskId: "runner-v1-paths", epoch: "e1", scope, workType: "documentation" });
-    installFakeCodex(fakeBin, "fake codex completed\\n");
-
-    const run = runCli([
-      "run",
-      "--target-cwd",
-      repo,
-      "--role",
-      "Implementer",
-      "--task-id",
-      "runner-v1-paths",
-      "--epoch",
-      "e1",
-      "--scope",
-      scope,
-      "--work-type",
-      "documentation",
-      "--assignment",
-      "validate explicit machine paths grammar",
-      "--expected-output",
-      "runner result",
-      "--runner",
-      "codex-cli",
-    ], {
-      env: pathWithFakeCodex(fakeBin),
-    });
-
-    assert.equal(run.status, 0, run.stderr);
-    assert.match(run.stdout, /ok runner: codex-cli/);
-    assert.match(readState(repo, "runner.md"), /type: process-runner-result/);
-  } finally {
-    rmSync(repo, { recursive: true, force: true });
-    rmSync(fakeBin, { recursive: true, force: true });
-  }
-});
-
-test("codex-cli runner accepts explicit scope:v1 all grammar as whole repo", () => {
-  const repo = makeTempGitRepo();
-  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
-  try {
-    const scope = "scope:v1 all";
-    intake(repo, { taskId: "runner-v1-all", epoch: "e1", scope });
-    installFakeCodex(fakeBin, "fake codex completed\\n", 'writeFileSync("anywhere.txt", "whole repo allowed\\n", "utf8");');
-
-    const run = runCli([
-      "run",
-      "--target-cwd",
-      repo,
-      "--role",
-      "Implementer",
-      "--task-id",
-      "runner-v1-all",
-      "--epoch",
-      "e1",
-      "--scope",
-      scope,
-      "--assignment",
-      "validate whole-repo machine grammar",
-      "--expected-output",
-      "runner result",
-      "--runner",
-      "codex-cli",
-    ], {
-      env: pathWithFakeCodex(fakeBin),
-    });
-
-    assert.equal(run.status, 0, run.stderr);
-    assert.equal(readFileSync(path.join(repo, "anywhere.txt"), "utf8"), "whole repo allowed\n");
-  } finally {
-    rmSync(repo, { recursive: true, force: true });
-    rmSync(fakeBin, { recursive: true, force: true });
-  }
-});
-
-test("codex-cli runner rejects glob scope before appending or launching", () => {
-  const repo = makeTempGitRepo();
-  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
-  try {
-    const scope = "scope:v1 paths=*.md";
-    intake(repo, { taskId: "runner-glob-reject", epoch: "e1", scope });
-    installFakeCodex(fakeBin, "fake codex completed\\n", 'writeFileSync("launched.txt", "runner launched\\n", "utf8");');
-
-    const run = runCli([
-      "run",
-      "--target-cwd",
-      repo,
-      "--role",
-      "Implementer",
-      "--task-id",
-      "runner-glob-reject",
-      "--epoch",
-      "e1",
-      "--scope",
-      scope,
-      "--assignment",
-      "glob scope should fail before launch",
-      "--expected-output",
-      "runner result",
-      "--runner",
-      "codex-cli",
-    ], {
-      env: pathWithFakeCodex(fakeBin),
-    });
-
-    assert.notEqual(run.status, 0);
-    assert.match(run.stderr, /globs, wildcards, or list punctuation are not supported/);
-    assert.equal(existsSync(path.join(repo, "launched.txt")), false);
-    assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
-  } finally {
-    rmSync(repo, { recursive: true, force: true });
-    rmSync(fakeBin, { recursive: true, force: true });
-  }
-});
-
-test("codex-cli runner rejects outside absolute and dot-dot scope before launch", () => {
-  const repo = makeTempGitRepo();
-  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
-  try {
-    installFakeCodex(fakeBin, "fake codex completed\\n", 'writeFileSync("launched.txt", "runner launched\\n", "utf8");');
-
-    for (const [taskId, scope, expected] of [
-      ["runner-absolute-reject", `scope:v1 paths=${path.join(os.tmpdir(), "outside-coding-agents.txt")}`, /absolute paths must resolve inside target cwd/],
-      ["runner-dotdot-reject", "scope:v1 paths=../outside.txt", /\.\. escapes are not supported/],
-    ]) {
-      intake(repo, { taskId, epoch: "e1", scope, workType: "documentation" });
-      const run = runCli([
-        "run",
-        "--target-cwd",
-        repo,
-        "--role",
-        "Implementer",
-        "--task-id",
-        taskId,
-        "--epoch",
-        "e1",
-        "--scope",
-        scope,
-        "--assignment",
-        "invalid scope should fail before launch",
-        "--expected-output",
-        "runner result",
-        "--runner",
-        "codex-cli",
-      ], {
-        env: pathWithFakeCodex(fakeBin),
-      });
-
-      assert.notEqual(run.status, 0, `${scope} unexpectedly passed`);
-      assert.match(run.stderr, expected);
-      assert.equal(existsSync(path.join(repo, "launched.txt")), false);
-      assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
-    }
-  } finally {
-    rmSync(repo, { recursive: true, force: true });
-    rmSync(fakeBin, { recursive: true, force: true });
-  }
-});
-
-test("codex-cli runner preserves legacy simple path-only scopes", () => {
-  const repo = makeTempGitRepo();
-  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
-  try {
-    installFakeCodex(fakeBin, "fake codex completed\\n");
-
-    for (const [index, scope] of [
-      "README.md",
-      "allowed/",
-      "bin/coding-agents.mjs tests/workflow-state.test.mjs",
-      ".",
-      "repo",
-      "whole repo",
-    ].entries()) {
-      const taskId = `runner-legacy-scope-${index}`;
-      intake(repo, { taskId, epoch: "e1", scope, workType: "documentation" });
-      const run = runCli([
-        "run",
-        "--target-cwd",
-        repo,
-        "--role",
-        "Implementer",
-        "--task-id",
-        taskId,
-        "--epoch",
-        "e1",
-        "--scope",
-        scope,
-        "--work-type",
-        "documentation",
-        "--assignment",
-        "validate legacy simple path scope",
-        "--expected-output",
-        "runner result",
-        "--runner",
-        "codex-cli",
-      ], {
-        env: pathWithFakeCodex(fakeBin),
-      });
-
-      assert.equal(run.status, 0, `${scope}: ${run.stderr}`);
-      assert.match(run.stdout, /ok runner: codex-cli/);
-    }
-  } finally {
-    rmSync(repo, { recursive: true, force: true });
-    rmSync(fakeBin, { recursive: true, force: true });
-  }
-});
-
-test("codex-cli runner rejects ambiguous legacy prose before appending or launching", () => {
-  const repo = makeTempGitRepo();
-  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
-  try {
-    const scope = "please edit README.md";
-    intake(repo, { taskId: "runner-prose-reject", epoch: "e1", scope });
-    installFakeCodex(fakeBin, "fake codex completed\\n", 'writeFileSync("launched.txt", "runner launched\\n", "utf8");');
-
-    const run = runCli([
-      "run",
-      "--target-cwd",
-      repo,
-      "--role",
-      "Implementer",
-      "--task-id",
-      "runner-prose-reject",
-      "--epoch",
-      "e1",
-      "--scope",
-      scope,
-      "--assignment",
-      "ambiguous prose should fail before launch",
-      "--expected-output",
-      "runner result",
-      "--runner",
-      "codex-cli",
-    ], {
-      env: pathWithFakeCodex(fakeBin),
-    });
-
-    assert.notEqual(run.status, 0);
-    assert.match(run.stderr, /requires a machine-checkable path-only scope/);
-    assert.equal(existsSync(path.join(repo, "launched.txt")), false);
-    assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
-  } finally {
-    rmSync(repo, { recursive: true, force: true });
-    rmSync(fakeBin, { recursive: true, force: true });
-  }
-});
-
-test("codex-cli runner rejects legacy list punctuation before appending or launching", () => {
-  const repo = makeTempGitRepo();
-  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
-  try {
-    const scope = "README.md;tests/";
-    intake(repo, { taskId: "runner-legacy-punctuation-reject", epoch: "e1", scope });
-    installFakeCodex(fakeBin, "fake codex completed\\n", 'writeFileSync("launched.txt", "runner launched\\n", "utf8");');
-
-    const run = runCli([
-      "run",
-      "--target-cwd",
-      repo,
-      "--role",
-      "Implementer",
-      "--task-id",
-      "runner-legacy-punctuation-reject",
-      "--epoch",
-      "e1",
-      "--scope",
-      scope,
-      "--assignment",
-      "legacy punctuation should fail before launch",
-      "--expected-output",
-      "runner result",
-      "--runner",
-      "codex-cli",
-    ], {
-      env: pathWithFakeCodex(fakeBin),
-    });
-
-    assert.notEqual(run.status, 0);
-    assert.match(run.stderr, /requires a machine-checkable path-only scope/);
-    assert.equal(existsSync(path.join(repo, "launched.txt")), false);
-    assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
-  } finally {
-    rmSync(repo, { recursive: true, force: true });
-    rmSync(fakeBin, { recursive: true, force: true });
-  }
-});
-
-test("codex-cli runner scope guard treats git rename source and destination as changed paths", () => {
-  const repo = makeTempGitRepo();
-  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
-  try {
-    commitFile(repo, "outside.txt", "tracked outside\n");
-    intake(repo, { taskId: "runner-rename", epoch: "e1", scope: "allowed/" });
-    const fakeCodex = path.join(fakeBin, "codex");
-    writeFileSync(fakeCodex, `#!/usr/bin/env node
-const { execFileSync } = require("node:child_process");
-const { mkdirSync } = require("node:fs");
-mkdirSync("allowed", { recursive: true });
-execFileSync("git", ["mv", "outside.txt", "allowed/outside.txt"]);
-process.stdout.write("fake codex renamed\\n");
-`, "utf8");
-    chmodSync(fakeCodex, 0o755);
-
-    const run = runCli([
-      "run",
-      "--target-cwd",
-      repo,
-      "--role",
-      "Implementer",
-      "--task-id",
-      "runner-rename",
-      "--epoch",
-      "e1",
-      "--scope",
-      "allowed/",
-      "--assignment",
-      "write only under allowed",
-      "--expected-output",
-      "runner result",
-      "--runner",
-      "codex-cli",
-    ], {
-      env: {
-        ...process.env,
-        PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}`,
-      },
-    });
-
-    assert.notEqual(run.status, 0);
-    assert.match(run.stderr, /outside scope allowed\/: outside\.txt/);
-    const runner = readState(repo, "runner.md");
-    assert.match(runner, /type: process-runner-result/);
-    assert.match(runner, /failure: runner changed files outside scope allowed\/: outside\.txt/);
-  } finally {
-    rmSync(repo, { recursive: true, force: true });
-    rmSync(fakeBin, { recursive: true, force: true });
-  }
-});
-
-test("codex-cli runner scope guard handles rename paths with spaces", () => {
-  const repo = makeTempGitRepo();
-  const fakeBin = mkdtempSync(path.join(os.tmpdir(), "coding-agents-fake-codex-"));
-  try {
-    commitFile(repo, "outside old name.txt", "tracked outside\n");
-    intake(repo, { taskId: "runner-rename-spaces", epoch: "e1", scope: "allowed/" });
-    const fakeCodex = path.join(fakeBin, "codex");
-    writeFileSync(fakeCodex, `#!/usr/bin/env node
-const { execFileSync } = require("node:child_process");
-const { mkdirSync } = require("node:fs");
-mkdirSync("allowed", { recursive: true });
-execFileSync("git", ["mv", "outside old name.txt", "allowed/new name.txt"]);
-process.stdout.write("fake codex renamed\\n");
-`, "utf8");
-    chmodSync(fakeCodex, 0o755);
-
-    const run = runCli([
-      "run",
-      "--target-cwd",
-      repo,
-      "--role",
-      "Implementer",
-      "--task-id",
-      "runner-rename-spaces",
-      "--epoch",
-      "e1",
-      "--scope",
-      "allowed/",
-      "--assignment",
-      "write only under allowed",
-      "--expected-output",
-      "runner result",
-      "--runner",
-      "codex-cli",
-    ], {
-      env: pathWithFakeCodex(fakeBin),
-    });
-
-    assert.notEqual(run.status, 0);
-    assert.match(run.stderr, /outside scope allowed\/: outside old name\.txt/);
-    const runner = readState(repo, "runner.md");
-    assert.match(runner, /failure: runner changed files outside scope allowed\/: outside old name\.txt/);
-  } finally {
-    rmSync(repo, { recursive: true, force: true });
-    rmSync(fakeBin, { recursive: true, force: true });
-  }
-});
-
-test("codex-cli runner validates runner name and timeout before appending assignment state", () => {
-  const repo = makeTempGitRepo();
-  try {
-    intake(repo, { taskId: "runner-validation", epoch: "e1", scope: "README.md" });
-
-    const badRunner = runCli([
-      "run",
-      "--target-cwd",
-      repo,
-      "--role",
-      "Implementer",
-      "--task-id",
-      "runner-validation",
-      "--epoch",
-      "e1",
-      "--scope",
-      "README.md",
-      "--assignment",
-      "write only the readme",
-      "--expected-output",
-      "runner result",
-      "--runner",
-      "bad-runner",
-    ]);
-    assert.notEqual(badRunner.status, 0);
-    assert.match(badRunner.stderr, /unknown runner: bad-runner/);
-    assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
-
-    const badTimeout = runCli([
-      "run",
-      "--target-cwd",
-      repo,
-      "--role",
-      "Implementer",
-      "--task-id",
-      "runner-validation",
-      "--epoch",
-      "e1",
-      "--scope",
-      "README.md",
-      "--assignment",
-      "write only the readme",
-      "--expected-output",
-      "runner result",
-      "--runner",
-      "codex-cli",
-      "--timeout-ms",
-      "0",
-    ]);
-    assert.notEqual(badTimeout.status, 0);
-    assert.match(badTimeout.stderr, /invalid --timeout-ms: expected positive integer/);
-    assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false);
-  } finally {
-    rmSync(repo, { recursive: true, force: true });
-  }
-});
-
 function intake(repo, options) {
   const args = [
     "intake",
@@ -2405,35 +1778,6 @@ function makeTempGitRepo() {
   const init = spawnSync("git", ["init"], { cwd: repo, encoding: "utf8" });
   assert.equal(init.status, 0, init.stderr);
   return repo;
-}
-
-function commitFile(repo, file, contents) {
-  writeFileSync(path.join(repo, file), contents, "utf8");
-  assert.equal(spawnSync("git", ["config", "user.email", "coding-agents-test@example.com"], { cwd: repo, encoding: "utf8" }).status, 0);
-  assert.equal(spawnSync("git", ["config", "user.name", "Coding Agents Test"], { cwd: repo, encoding: "utf8" }).status, 0);
-  assert.equal(spawnSync("git", ["add", file], { cwd: repo, encoding: "utf8" }).status, 0);
-  const commit = spawnSync("git", ["commit", "-m", `track ${file}`], { cwd: repo, encoding: "utf8" });
-  assert.equal(commit.status, 0, commit.stderr);
-}
-
-function installFakeCodex(fakeBin, message, extraBody = "") {
-  const fakeCodex = path.join(fakeBin, "codex");
-  writeFileSync(fakeCodex, `#!/usr/bin/env node
-const { writeFileSync } = require("node:fs");
-const args = process.argv.slice(2);
-const outputIndex = args.indexOf("--output-last-message");
-if (outputIndex !== -1) writeFileSync(args[outputIndex + 1], "${message}", "utf8");
-${extraBody}
-process.stdout.write("fake codex completed\\n");
-`, "utf8");
-  chmodSync(fakeCodex, 0o755);
-}
-
-function pathWithFakeCodex(fakeBin) {
-  return {
-    ...process.env,
-    PATH: `${fakeBin}${path.delimiter}${process.env.PATH || ""}`,
-  };
 }
 
 function runCli(args, options = {}) {
@@ -2494,6 +1838,27 @@ This file records legacy packets without work_type.
 - next: parent final verification
 - debugging_integrity: debug work requires root cause and verification
 - lifecycle: Parent integrates this packet, records any blocker or follow-up, then closes or retires the subagent unless an explicitly scoped continuation is required.
+
+## Historical Process Runner Results
+
+### 2026-06-13T00:02:00.000Z Implementer ${taskId}
+
+- type: process-runner-result
+- role: Implementer
+- status: failed
+- task_id: ${taskId}
+- epoch: e1
+- scope: README.md
+- feature_profile: none
+- invocation_cwd: /tmp/legacy
+- target_cwd: /tmp/legacy
+- runner: codex-cli
+- spawned: true
+- exit_code: 1
+- summary: historical process runner record retained for audit
+- failure: historical process runner failed before completion
+- debugging_integrity: debug work requires root cause and verification
+- lifecycle: historical process result is retained as an immutable workflow record
 `;
 }
 
