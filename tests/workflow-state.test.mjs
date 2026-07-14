@@ -14,8 +14,8 @@ const CODING_CONDUCT_RULES =
   /coding_conduct_rules: .*GitHub\/npm OSS.*do not reimplement.*first principles.*fallback implementations.*main-flow errors/;
 
 function contractCoverageArgs(taskId) {
-  const decisions = Array.from({ length: 8 }, (_, index) => `D-${taskId}-${String(index + 1).padStart(3, "0")}`);
-  const completions = Array.from({ length: 10 }, (_, index) => `C-${taskId}-${String(index + 1).padStart(3, "0")}`);
+  const decisions = Array.from({ length: 4 }, (_, index) => `D-${taskId}-${String(index + 1).padStart(3, "0")}`);
+  const completions = Array.from({ length: 5 }, (_, index) => `C-${taskId}-${String(index + 1).padStart(3, "0")}`);
   return [
     "--contract-coverage",
     "required",
@@ -137,8 +137,8 @@ test("finalize requires exact delimiter-aware coverage IDs while preserving colo
   const repo = makeTempGitRepo();
   try {
     const taskId = "coverage-boundary";
-    const decisionIds = Array.from({ length: 8 }, (_, index) => `D-${taskId}-${String(index + 1).padStart(3, "0")}`);
-    const completionIds = Array.from({ length: 10 }, (_, index) => `C-${taskId}-${String(index + 1).padStart(3, "0")}`);
+    const decisionIds = Array.from({ length: 4 }, (_, index) => `D-${taskId}-${String(index + 1).padStart(3, "0")}`);
+    const completionIds = Array.from({ length: 5 }, (_, index) => `C-${taskId}-${String(index + 1).padStart(3, "0")}`);
     intake(repo, { taskId, epoch: "e1", scope: "README.md", workType: "documentation" });
 
     const suffixedFake = runCli([
@@ -165,7 +165,7 @@ test("finalize requires exact delimiter-aware coverage IDs while preserving colo
       "path:.coding-agents/task.md",
     ]);
     assert.notEqual(suffixedFake.status, 0);
-    assert.match(suffixedFake.stderr, /decision_coverage\.D-coverage-boundary-008/);
+    assert.match(suffixedFake.stderr, /decision_coverage\.D-coverage-boundary-004/);
     assert.equal(existsSync(path.join(repo, ".coding-agents", "runner.md")), false, "rejected finalize must be atomic");
 
     const exactMappings = runCli([
@@ -204,8 +204,8 @@ test("finalize keeps prefix-collision coverage IDs independently required", () =
   const repo = makeTempGitRepo();
   try {
     const taskId = "prefix";
-    const generatedDecisionIds = Array.from({ length: 8 }, (_, index) => `D-${taskId}-${String(index + 1).padStart(3, "0")}`);
-    const completionIds = Array.from({ length: 10 }, (_, index) => `C-${taskId}-${String(index + 1).padStart(3, "0")}`);
+    const generatedDecisionIds = Array.from({ length: 4 }, (_, index) => `D-${taskId}-${String(index + 1).padStart(3, "0")}`);
+    const completionIds = Array.from({ length: 5 }, (_, index) => `C-${taskId}-${String(index + 1).padStart(3, "0")}`);
     intake(repo, { taskId, epoch: "e1", scope: "README.md", workType: "documentation" });
 
     const decisionsPath = path.join(repo, ".coding-agents", "decisions.md");
@@ -249,8 +249,8 @@ test("finalize rejects skip and skipped test results as typed completion evidenc
     const repo = makeTempGitRepo();
     try {
       const taskId = `typed-${resultValue}`;
-      const decisionIds = Array.from({ length: 8 }, (_, index) => `D-${taskId}-${String(index + 1).padStart(3, "0")}`);
-      const completionIds = Array.from({ length: 10 }, (_, index) => `C-${taskId}-${String(index + 1).padStart(3, "0")}`);
+      const decisionIds = Array.from({ length: 4 }, (_, index) => `D-${taskId}-${String(index + 1).padStart(3, "0")}`);
+      const completionIds = Array.from({ length: 5 }, (_, index) => `C-${taskId}-${String(index + 1).padStart(3, "0")}`);
       intake(repo, { taskId, epoch: "e1", scope: "README.md", workType: "documentation" });
 
       const rejected = runCli([
@@ -569,8 +569,14 @@ test("intake describes fixed roles as scaffold, not resident agents", () => {
     const assignments = readState(repo, "assignments.md");
     assert.match(assignments, /# Role Assignment Scaffold/);
     assert.match(assignments, /not resident agents or spawned workers/);
+    assert.match(assignments, /shared contracts below apply once to every scaffold role/i);
     assert.equal([...assignments.matchAll(/^## (?!Debugging|Coding Conduct|Meta-Cognitive|Nested|Subagent)(.+)$/gm)].length, 14);
     assert.match(assignments, /- status: scaffolded/);
+    const taskState = readState(repo, "task.md");
+    const decisions = readState(repo, "decisions.md");
+    assert.equal([...taskState.matchAll(/^- C-role-scaffold-\d{3}:/gm)].length, 5);
+    assert.equal([...decisions.matchAll(/^## D-role-scaffold-\d{3} /gm)].length, 4);
+    assert.match(taskState, /The requested task is completed within scope and outcome evidence addresses:/);
 
     const verify = runCli(["verify-assignments", "--target-cwd", repo]);
     assert.equal(verify.status, 0, verify.stdout + verify.stderr);
@@ -583,7 +589,7 @@ test("intake describes fixed roles as scaffold, not resident agents", () => {
   }
 });
 
-test("intake generates supervision guidance in assignments and handoff", () => {
+test("intake centralizes shared supervision guidance without duplicating scaffold roles", () => {
   const repo = makeTempGitRepo();
   try {
     intake(repo, { taskId: "supervision-intake", epoch: "e1", scope: "README.md" });
@@ -599,8 +605,11 @@ test("intake generates supervision guidance in assignments and handoff", () => {
     assert.match(assignments, /## Coding Conduct Gate/);
     assert.match(assignments, /coding_conduct_gate: Coding Conduct Gate/);
     assert.match(assignments, CODING_CONDUCT_RULES);
-    assertSupervisionSchema(implementer);
-    assert.match(implementer, CODING_CONDUCT_RULES);
+    assertSupervisionSchema(assignments);
+    assert.doesNotMatch(implementer, /^- supervision_contract:/m);
+    assert.doesNotMatch(implementer, /^- coding_conduct_gate:/m);
+    assert.doesNotMatch(implementer, /^- contract_coverage_gate:/m);
+    assert.ok(Buffer.byteLength(assignments) < 20_000, `assignments scaffold is unexpectedly large: ${Buffer.byteLength(assignments)} bytes`);
 
     const handoff = readState(repo, "handoff.md");
     assert.match(handoff, /^Supervision:$/m);
@@ -1607,7 +1616,9 @@ test("normalize adds missing hierarchy and machine supervision fields to stale g
     assert.match(normalized.stdout, /Updated: assignments\.md/);
     assert.match(normalized.stdout, /Updated: runner\.md/);
 
-    assertSupervisionSchema(getRoleSection(readState(repo, "assignments.md"), "Implementer"));
+    const normalizedAssignments = readState(repo, "assignments.md");
+    assertSupervisionSchema(normalizedAssignments);
+    assert.doesNotMatch(getRoleSection(normalizedAssignments, "Implementer"), /^- hierarchy_mode:/m);
     assert.match(readState(repo, "runner.md"), /type: assignment[\s\S]*hierarchy_mode: none/);
     assert.match(readState(repo, "runner.md"), /type: assignment[\s\S]*heartbeat_interval: PT15M/);
     assert.equal(runCli(["verify-assignments", "--target-cwd", repo]).status, 0);

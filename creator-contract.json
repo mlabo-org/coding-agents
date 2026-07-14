@@ -45,7 +45,7 @@
   "outputs": [
     {
       "name": "Workflow-state packets",
-      "description": "Validated .coding-agents intake, assignment, collection, finalization, orchestration-skeleton, audit, and handoff records."
+      "description": "Validated .coding-agents intake, compact shared-contract scaffold, assignment, collection, finalization, orchestration-skeleton, audit, and handoff records."
     },
     {
       "name": "Official subagent dispatch boundary",
@@ -116,7 +116,7 @@
       },
       {
         "id": "workflow-state-preserved",
-        "description": "The .coding-agents intake, assignment, collection, finalization, handoff, doctor, verification, lifecycle, and historical packet compatibility remain enforced.",
+        "description": "The .coding-agents intake keeps shared scaffold contracts compact and task coverage outcome-focused while assignment, collection, finalization, handoff, doctor, verification, lifecycle, full dispatched-packet contracts, and historical packet compatibility remain enforced.",
         "enforcement_points": [
           "bin/coding-agents.mjs"
         ],

@@ -54,8 +54,8 @@ const META_ARGS = [
 ];
 
 function contractCoverageArgs(taskId) {
-  const decisions = Array.from({ length: 8 }, (_, index) => `D-${taskId}-${String(index + 1).padStart(3, "0")}`);
-  const completions = Array.from({ length: 10 }, (_, index) => `C-${taskId}-${String(index + 1).padStart(3, "0")}`);
+  const decisions = Array.from({ length: 4 }, (_, index) => `D-${taskId}-${String(index + 1).padStart(3, "0")}`);
+  const completions = Array.from({ length: 5 }, (_, index) => `C-${taskId}-${String(index + 1).padStart(3, "0")}`);
   const refs = [
     "file:bin/coding-agents.mjs",
     "path:tests/metacognitive-gate.test.mjs",
@@ -402,9 +402,9 @@ test("collect permits worker completion without global coverage and finalize enf
       "--contract-coverage",
       "required",
       "--decision-coverage",
-      Array.from({ length: 8 }, (_, index) => `D-${taskId}-${String(index + 1).padStart(3, "0")}: done`).join(" | "),
+      Array.from({ length: 4 }, (_, index) => `D-${taskId}-${String(index + 1).padStart(3, "0")}: done`).join(" | "),
       "--completion-coverage",
-      Array.from({ length: 10 }, (_, index) => `C-${taskId}-${String(index + 1).padStart(3, "0")}: done`).join(" | "),
+      Array.from({ length: 5 }, (_, index) => `C-${taskId}-${String(index + 1).padStart(3, "0")}: done`).join(" | "),
       "--source-spec-coverage",
       "ok",
     ]);
@@ -976,7 +976,8 @@ test("normalization recovers stale pre-gate state without faking completed evide
     assert.equal(runCli(["doctor", "--target-cwd", repo]).status, 0);
 
     const normalizedAssignments = readState(repo, "assignments.md");
-    assert.match(getRoleSection(normalizedAssignments, "Implementer"), /metacognitive_gate_fields: .*root_cause/);
+    assert.match(normalizedAssignments, /metacognitive_gate_fields: .*root_cause/);
+    assert.doesNotMatch(getRoleSection(normalizedAssignments, "Implementer"), /^- metacognitive_gate_fields:/m);
     assert.doesNotMatch(getRoleSection(normalizedAssignments, "Implementer"), /^- root_cause:/m);
 
     const normalizedRunner = readState(repo, "runner.md");

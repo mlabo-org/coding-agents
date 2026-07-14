@@ -64,8 +64,9 @@ Items 1-10 are Coding Agents self changes. Item 11 is external legacy cleanup.
      non-current packets that predate the recorded activation time remain
      `unknown_legacy`; normalization and validation must not synthesize a
      retirement decision for them.
-   - Generated assignments, runner packets, and handoff material
-     must carry this lifecycle rule so future job state preserves it.
+   - The assignment scaffold stores this lifecycle rule once as a shared
+     contract. Actual assignment packets, runner packets, and handoff material
+     carry the complete worker-facing fields so future job state preserves it.
 
 5. Subagent supervision and finite delegation depth
    - Delegation hierarchy must be finite. Valid modes are `none`, `one_level`,
@@ -77,8 +78,10 @@ Items 1-10 are Coding Agents self changes. Item 11 is external legacy cleanup.
      receive `depth: 1` and `remaining_depth: 0`.
    - `n_level` permits a bounded descendant chain only when the parent provides
      finite `max_depth`, current `depth`, and calculated `remaining_depth`.
-   - Every subagent assignment must include the finite hierarchy fields. Infinite
-     or unbounded depth is invalid. Descendants inherit supervision,
+   - Every dispatched subagent assignment must include the finite hierarchy
+     fields. The fixed 14-role scaffold stores shared defaults once instead of
+     duplicating them in every inactive role slot. Infinite or unbounded depth
+     is invalid. Descendants inherit supervision,
      cancellation, scope, depth, and permission limits and may narrow but never
      broaden them.
    - Long-running or delegated assignments must carry supervision fields:
@@ -147,8 +150,8 @@ Items 1-10 are Coding Agents self changes. Item 11 is external legacy cleanup.
 
 8. Coding Conduct Gate
    - Coding and debug work must carry a machine-visible Coding Conduct Gate in
-     generated assignments, runner packets, handoff material,
-     and validation for modern workflow state.
+     the shared assignment scaffold contract, every dispatched assignment and
+     runner packet, handoff material, and validation for modern workflow state.
    - If a mature open-source solution exists on GitHub or npm and fits the
      requirement, Coding Agents must reuse it directly instead of
      reimplementing the solved problem.
@@ -192,6 +195,11 @@ Items 1-10 are Coding Agents self changes. Item 11 is external legacy cleanup.
      `bin/coding-agents.mjs` and its contract tests own the acceptance
      predicates; this specification records the command boundary and artifact
      contract rather than replacing executable validation.
+   - Intake keeps task coverage compact and outcome-oriented: four accepted
+     task decisions and five completion conditions cover the requested outcome,
+     scope/runtime boundaries, worker lifecycle, work quality, verification,
+     and finalization. Static workflow guardrails remain validator-owned rather
+     than becoming additional per-task D-*/C-* mappings.
    - `verify-assignments` and `doctor` validate modern task-finalization
      packets. Legacy `parent-integration` packets remain readable for backward
      validation, and the strict lifecycle rules remain attached to modern
@@ -245,7 +253,8 @@ Future implementation work should preserve this split:
   from the plugin repository does not make the plugin repository the state owner
   when `--target-cwd` or an explicit target points elsewhere.
 - Generated job state must preserve nested Coding Agents preflight suppression,
-  finite delegation depth, subagent supervision and cancellation rules,
+  finite delegation depth, subagent supervision and cancellation rules through
+  one shared scaffold contract plus complete dispatched packet fields,
   workflow-state lifecycle disposition without runtime-thread closure claims,
   concise worker-result and result-reference rules, parent-owned task
   finalization with typed Contract Coverage, the Coding Conduct Gate, debug
