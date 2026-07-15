@@ -2,16 +2,28 @@
 
 Coding Agents is an explicit-only Codex plugin for inspectable coding workflow state. It records intake, bounded assignments, collection, finalization, audit, and handoff packets under `.coding-agents/`. Actual workers are dispatched only through official Codex subagent tools; the source CLI is record-only and never launches `codex exec` or a custom process runner.
 
-It is designed to operate beneath [Agentic Runner](https://github.com/mlabo-org/agentic-runner), which owns the higher-level route, scope, lifecycle, supervision, and audit trail.
+Coding Agents is fully usable on its own from specification consultation through bounded implementation and verification. [Agentic Runner](https://github.com/mlabo-org/agentic-runner) is an optional upper control plane for work that spans multiple owners or outputs; neither plugin requires the other to be installed or invoked.
+
+## Standalone Or Paired
+
+- **Coding Agents alone** — discuss a new code specification, turn confirmed decisions into an instruction document, execute bounded assignments, and verify the result against that contract.
+- **With Agentic Runner** — keep the same coding workflow while Agentic Runner owns shared constraints, cross-owner routing, supervision, resume checkpoints, and final convergence.
+
+Agentic Runner can also run without Coding Agents, using any other declared owners. The pair is an optional composition, not a set-only product.
 
 ## Install
 
-The Agentic Runner repository publishes the shared marketplace:
+The Agentic Runner repository publishes two independent entries in one shared marketplace. For a standalone Coding Agents install:
 
 ```sh
 codex plugin marketplace add mlabo-org/agentic-runner --ref main
-codex plugin add agentic-runner@agentic-control-plane
 codex plugin add coding-agents@agentic-control-plane
+```
+
+That is a complete standalone install. To add the optional upper control plane and form the pair:
+
+```sh
+codex plugin add agentic-runner@agentic-control-plane
 ```
 
 Restart Codex or start a new task after installation.

@@ -54,18 +54,6 @@
   ],
   "validation_commands": [
     {
-      "name": "official-plugin-validation",
-      "argv": [
-        "/Users/suzukimakoto/.codex/skills/codex-python-runtime/scripts/codex-python",
-        "/Users/suzukimakoto/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py",
-        "."
-      ],
-      "covers": [],
-      "test_paths": [],
-      "cwd": ".",
-      "timeout_seconds": 120
-    },
-    {
       "name": "full-contract-tests",
       "argv": [
         "/usr/bin/env",
@@ -83,18 +71,32 @@
       ],
       "cwd": ".",
       "timeout_seconds": 180
+    },
+    {
+      "name": "source-doctor",
+      "argv": [
+        "npm",
+        "run",
+        "doctor:self"
+      ],
+      "covers": [],
+      "test_paths": [
+        "tests/workflow-state.test.mjs"
+      ],
+      "cwd": ".",
+      "timeout_seconds": 120
     }
   ],
   "runtime_boundaries": {
     "source_of_truth": ".",
     "generated_or_runtime_paths": [
       ".coding-agents/",
-      "/Users/suzukimakoto/.codex/plugins/cache/local-plugins/coding-agents/"
+      "~/.codex/plugins/cache/local-plugins/coding-agents"
     ],
     "forbidden_source_paths": [
       ".coding-agents/",
-      "/Users/suzukimakoto/.codex/plugins/cache/",
-      "/Users/suzukimakoto/.codex/skills/.system/"
+      "~/.codex/plugins/cache",
+      "~/.codex/skills/.system"
     ]
   },
   "user_facing_ui": {
